@@ -1,0 +1,435 @@
+// Pueblo Delivery Marketplace — Prisma Schema
+// 21 tables, 5 enums, full relations and indices
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ───────────────────────────────────────────────────
+
+enum UserRole {
+  CUSTOMER
+  RESTAURANT_OWNER
+  RESTAURANT_STAFF
+  ADMIN
+}
+
+enum RestaurantUserRole {
+  OWNER
+  STAFF
+}
+
+enum OrderStatus {
+  PLACED
+  ACCEPTED
+  REJECTED
+  PREPARING
+  READY_FOR_PICKUP
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+}
+
+enum FulfillmentType {
+  ASAP
+  SCHEDULED
+}
+
+enum ConsentType {
+  NECESSARY
+  ANALYTICS
+  MARKETING
+}
+
+// ─── 1. User ─────────────────────────────────────────────────
+
+model User {
+  id                  String    @id @default(cuid())
+  name                String
+  email               String    @unique
+  emailVerified       DateTime?
+  passwordHash        String?
+  image               String?
+  role                UserRole  @default(CUSTOMER)
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  authAccounts     AuthAccount[]
+  sessions         Session[]
+  restaurantUsers  RestaurantUser[]
+  cart             Cart?
+  addresses        Address[]
+  orders           Order[]
+  orderStatusChanges OrderStatusHistory[]
+  cookieConsents   CookieConsent[]
+  legalAcceptances LegalAcceptance[]
+  auditLogs        AdminAuditLog[]
+
+  @@map("users")
+}
+
+// ─── 2. AuthAccount ──────────────────────────────────────────
+
+model AuthAccount {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("auth_accounts")
+}
+
+// ─── 3. Session ──────────────────────────────────────────────
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+// ─── 4. Restaurant ───────────────────────────────────────────
+
+model Restaurant {
+  id              String   @id @default(cuid())
+  name            String
+  slug            String   @unique
+  description     String?
+  imageUrl        String?
+  cuisineType     String?
+  deliveryFeeEur  Decimal  @db.Decimal(10, 2)
+  minOrderEur     Decimal  @db.Decimal(10, 2)
+  deliveryRadiusKm Float
+  lat             Float
+  lng             Float
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  restaurantUsers RestaurantUser[]
+  openingHours    OpeningHour[]
+  deliveryZones   DeliveryZone[]
+  categories      Category[]
+  carts           Cart[]
+  orders          Order[]
+
+  @@index([isActive])
+  @@map("restaurants")
+}
+
+// ─── 5. RestaurantUser ───────────────────────────────────────
+
+model RestaurantUser {
+  id           String             @id @default(cuid())
+  userId       String
+  restaurantId String
+  role         RestaurantUserRole
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, restaurantId])
+  @@map("restaurant_users")
+}
+
+// ─── 6. OpeningHour ──────────────────────────────────────────
+
+model OpeningHour {
+  id           String @id @default(cuid())
+  restaurantId String
+  dayOfWeek    Int    // 0=Monday, 6=Sunday
+  openTime     String // "HH:mm"
+  closeTime    String // "HH:mm"
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@index([restaurantId])
+  @@map("opening_hours")
+}
+
+// ─── 7. DeliveryZone ─────────────────────────────────────────
+
+model DeliveryZone {
+  id           String @id @default(cuid())
+  restaurantId String
+  radiusKm     Float
+  lat          Float
+  lng          Float
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@map("delivery_zones")
+}
+
+// ─── 8. Category ─────────────────────────────────────────────
+
+model Category {
+  id           String   @id @default(cuid())
+  restaurantId String
+  name         String
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  products   Product[]
+
+  @@index([restaurantId])
+  @@map("categories")
+}
+
+// ─── 9. Product ──────────────────────────────────────────────
+
+model Product {
+  id          String   @id @default(cuid())
+  categoryId  String
+  name        String
+  description String?
+  priceEur    Decimal  @db.Decimal(10, 2)
+  imageUrl    String   // NOT NULL — required
+  isAvailable Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  category         Category          @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  productAllergens ProductAllergen[]
+  cartItems        CartItem[]
+  orderItems       OrderItem[]
+
+  @@index([categoryId])
+  @@index([isAvailable])
+  @@map("products")
+}
+
+// ─── 10. Allergen ────────────────────────────────────────────
+
+model Allergen {
+  id     Int    @id
+  code   String @unique
+  nameEs String
+  icon   String
+
+  productAllergens ProductAllergen[]
+
+  @@map("allergens")
+}
+
+// ─── 11. ProductAllergen ─────────────────────────────────────
+
+model ProductAllergen {
+  id         String @id @default(cuid())
+  productId  String
+  allergenId Int
+
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  allergen Allergen @relation(fields: [allergenId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, allergenId])
+  @@map("product_allergens")
+}
+
+// ─── 12. Cart ────────────────────────────────────────────────
+
+model Cart {
+  id           String   @id @default(cuid())
+  userId       String   @unique // one cart per user
+  restaurantId String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  restaurant Restaurant? @relation(fields: [restaurantId], references: [id], onDelete: SetNull)
+  items      CartItem[]
+
+  @@map("carts")
+}
+
+// ─── 13. CartItem ────────────────────────────────────────────
+
+model CartItem {
+  id        String   @id @default(cuid())
+  cartId    String
+  productId String
+  quantity  Int      @default(1)
+  notes     String?
+  createdAt DateTime @default(now())
+
+  cart    Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("cart_items")
+}
+
+// ─── 14. Address ─────────────────────────────────────────────
+
+model Address {
+  id         String   @id @default(cuid())
+  userId     String
+  label      String?
+  street     String
+  municipality String
+  city       String
+  postalCode String
+  floorDoor  String?
+  lat        Float
+  lng        Float
+  createdAt  DateTime @default(now())
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orders Order[]
+
+  @@index([userId])
+  @@map("addresses")
+}
+
+// ─── 15. GeocodingCache ──────────────────────────────────────
+
+model GeocodingCache {
+  id                  String   @id @default(cuid())
+  normalizedAddress   String   @unique
+  lat                 Float
+  lng                 Float
+  comunidadAutonoma   String?
+  municipality        String?
+  postalCode          String?
+  createdAt           DateTime @default(now())
+
+  @@map("geocoding_cache")
+}
+
+// ─── 16. Order ───────────────────────────────────────────────
+
+model Order {
+  id              String         @id @default(cuid())
+  orderNumber     Int            @unique @default(autoincrement())
+  userId          String
+  restaurantId    String
+  addressId       String
+  phone           String
+  fulfillmentType FulfillmentType
+  scheduledFor    DateTime?
+  subtotalEur     Decimal        @db.Decimal(10, 2)
+  deliveryFeeEur  Decimal        @db.Decimal(10, 2)
+  totalEur        Decimal        @db.Decimal(10, 2)
+  currentStatus   OrderStatus    @default(PLACED)
+  eta             DateTime?
+  etaWindowEnd    DateTime?
+  idempotencyKey  String         @unique
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  address    Address    @relation(fields: [addressId], references: [id], onDelete: Cascade)
+  items      OrderItem[]
+  statusHistory OrderStatusHistory[]
+
+  @@index([userId])
+  @@index([restaurantId])
+  @@index([currentStatus])
+  @@map("orders")
+}
+
+// ─── 17. OrderItem ───────────────────────────────────────────
+
+model OrderItem {
+  id              String   @id @default(cuid())
+  orderId         String
+  productId       String
+  productName     String   // snapshot
+  productPriceEur Decimal  @db.Decimal(10, 2) // snapshot
+  quantity        Int
+  createdAt       DateTime @default(now())
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("order_items")
+}
+
+// ─── 18. OrderStatusHistory ──────────────────────────────────
+
+model OrderStatusHistory {
+  id              String       @id @default(cuid())
+  orderId         String
+  fromStatus      OrderStatus?
+  toStatus        OrderStatus
+  changedByUserId String
+  reason          String?
+  createdAt       DateTime     @default(now())
+
+  order     Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  changedBy User  @relation(fields: [changedByUserId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@map("order_status_history")
+}
+
+// ─── 19. CookieConsent ───────────────────────────────────────
+
+model CookieConsent {
+  id          String      @id @default(cuid())
+  userId      String?
+  consentType ConsentType
+  decision    Boolean
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime    @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("cookie_consents")
+}
+
+// ─── 20. LegalAcceptance ─────────────────────────────────────
+
+model LegalAcceptance {
+  id              String   @id @default(cuid())
+  userId          String
+  documentType    String
+  documentVersion String
+  ipAddress       String?
+  createdAt       DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("legal_acceptances")
+}
+
+// ─── 21. AdminAuditLog ───────────────────────────────────────
+
+model AdminAuditLog {
+  id           String   @id @default(cuid())
+  userId       String
+  action       String
+  resourceType String
+  resourceId   String?
+  details      Json?
+  ipAddress    String?
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("admin_audit_log")
+}
