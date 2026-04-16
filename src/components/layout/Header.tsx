@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { auth } from '@/lib/auth/auth';
+import SignOutButton from './SignOutButton';
 
 const ROLE_LABELS: Record<string, string> = {
   ADMIN: 'Admin',
@@ -78,14 +79,7 @@ export default async function Header() {
                 <span className="hidden sm:inline">{user.name}</span>
               </Link>
               {/* Sign out */}
-              <form action="/api/auth/signout" method="POST">
-                <button
-                  type="submit"
-                  className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
-                >
-                  Salir
-                </button>
-              </form>
+              <SignOutButton />
             </>
           ) : (
             <Link
