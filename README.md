@@ -8,90 +8,87 @@ Marketplace de delivery para pueblos y ciudades de Andalucía. Conecta clientes 
 |---|---|
 | Next.js 16 (App Router) + TypeScript | Framework full-stack |
 | Tailwind CSS v4 | Estilos mobile-first |
-| Prisma 7 + Postgres | ORM + Base de datos |
+| Prisma 7 + Supabase PostgreSQL | ORM + Base de datos |
 | Auth.js v5 | Autenticación (email + Google OAuth) |
 | CartoCiudad | Geocodificación (gratuito, gobierno español) |
 | Cloudflare R2 | Almacenamiento de imágenes |
 | Resend | Envío de emails |
 | Sentry | Monitorización de errores |
 | Vitest + fast-check | Testing unitario + property-based |
+| GitHub Actions | CI/CD (lint, tests, deploy) |
+| Vercel | Hosting (producción y staging) |
 
 ---
 
-## 🚀 Configuración local paso a paso
+## 🚀 Configuración local (desarrollo)
 
 ### Requisitos previos
 
-- **Node.js 18+** instalado
-- **pnpm** instalado (`npm install -g pnpm`)
-- **Una cuenta en Supabase** (gratuita) → [supabase.com](https://supabase.com)
+- **Node.js 20+**
+- **pnpm** (`npm install -g pnpm`)
+- **Docker** corriendo (para Supabase local)
+- **Supabase CLI** (`npm install -g supabase` o [ver docs](https://supabase.com/docs/guides/cli))
 
-### Paso 1: Instalar dependencias
+### Setup automático (recomendado)
 
 ```bash
+# 1. Instalar dependencias
 pnpm install
-```
 
-### Paso 2: Configurar la base de datos (Supabase)
-
-1. Ve a [supabase.com](https://supabase.com) e inicia sesión
-2. Si no tienes un proyecto, crea uno nuevo:
-   - Nombre: `pueblo-delivery` (o el que quieras)
-   - Región: `West EU (Ireland)` o la más cercana
-   - Contraseña de la base de datos: **apúntala, la necesitarás**
-3. Una vez creado, ve a **Settings** → **Database** (en el menú lateral)
-4. En la sección **Connection string**, selecciona **URI**
-5. Verás algo como:
-   ```
-   postgresql://postgres.[tu-ref]:[TU-PASSWORD]@aws-0-eu-west-3.pooler.supabase.com:6543/postgres
-   ```
-6. **Copia esa URL** y reemplaza `[TU-PASSWORD]` por la contraseña que pusiste al crear el proyecto
-7. Abre el archivo `.env` en la raíz del proyecto y pega la URL en `DATABASE_URL`:
-   ```
-   DATABASE_URL="postgresql://postgres.abcdefgh:MiPassword123@aws-0-eu-west-3.pooler.supabase.com:6543/postgres"
-   ```
-
-> **Nota:** Usa la connection string con puerto **6543** (Transaction pooler), no la de puerto 5432.
-
-### Paso 3: Generar el cliente Prisma
-
-```bash
+# 2. Generar el cliente Prisma
 pnpm prisma generate
-```
 
-Esto genera los tipos TypeScript a partir del schema de la base de datos.
+# 3. Levantar todo: Supabase local + migraciones + seed
+chmod +x scripts/setup.sh
+./scripts/setup.sh
 
-### Paso 4: Crear las tablas en Supabase
-
-```bash
-pnpm prisma migrate dev --name init
-```
-
-Esto crea las 21 tablas, enums, índices y relaciones en tu base de datos de Supabase. Tardará unos segundos.
-
-> Si te da error de conexión, verifica que la `DATABASE_URL` en `.env` es correcta y que la contraseña no tiene caracteres especiales sin escapar.
-
-### Paso 5: Cargar datos de prueba
-
-```bash
-pnpm prisma:seed
-```
-
-Esto carga:
-- 14 alérgenos UE
-- 5 restaurantes con horarios y zonas de reparto (Sevilla, Málaga, Córdoba, Cádiz, Granada)
-- 52 productos con alérgenos asignados
-- 12 usuarios con contraseñas hasheadas
-- 10 direcciones de Andalucía
-- 12 pedidos de ejemplo con historial de estados
-
-### Paso 6: Arrancar el servidor
-
-```bash
+# 4. Arrancar la app
 pnpm dev
 ```
 
-Abre **http://localhost:3000** en tu navegador. ¡Ya está!
+Abre **http://localhost:3000**. Listo.
+
+### Qué hace `setup.sh`
+
+1. Arranca Supabase local con Docker (`supabase start`) — PostgreSQL, Studio, Auth, Storage, Inbucket
+2. Aplica las migraciones de Prisma contra la DB local (`prisma migrate deploy`)
+3. Carga los datos de prueba vía SQL (`psql -f supabase/seed.sql`)
+4. Muestra las URLs de los servicios y las credenciales de acceso
+
+### Servicios locales
+
+| Servicio | URL |
+|---|---|
+| App (Next.js) | http://localhost:3000 |
+| Supabase Studio | http://127.0.0.1:54323 |
+| Supabase API | http://127.0.0.1:54321 |
+| PostgreSQL | `postgresql://postgres:postgres@127.0.0.1:54322/postgres` |
+| Inbucket (emails) | http://127.0.0.1:54324 |
+
+### Setup manual (paso a paso)
+
+Si prefieres hacerlo a mano o no tienes Docker:
+
+```bash
+# 1. Instalar dependencias
+pnpm install
+
+# 2. Copiar y configurar variables de entorno
+cp .env.example .env
+# Edita .env y pon tu DATABASE_URL (local o remota de Supabase)
+
+# 3. Generar cliente Prisma
+pnpm prisma generate
+
+# 4. Aplicar migraciones
+npx prisma migrate deploy
+
+# 5. Cargar datos de prueba (opcional)
+pnpm prisma:seed
+
+# 6. Arrancar
+pnpm dev
+```
 
 ---
 
@@ -118,98 +115,110 @@ Otros clientes: `carlos@ejemplo.es`, `elena@ejemplo.es`, `miguel@ejemplo.es`, `s
 | `pnpm build` | Build de producción |
 | `pnpm start` | Servidor de producción |
 | `pnpm lint` | Linter ESLint |
-| `pnpm test` | Tests unitarios (Vitest) |
+| `pnpm test` | Tests unitarios (Vitest + fast-check) |
 | `pnpm test:watch` | Tests en modo watch |
+| `pnpm test:integration` | Tests de integración |
 | `pnpm test:e2e` | Tests E2E (Playwright) |
-| `pnpm prisma:seed` | Cargar datos de prueba |
+| `pnpm prisma:seed` | Cargar datos de prueba vía TypeScript |
 | `pnpm prisma studio` | Explorar la DB visualmente |
 
 ---
 
 ## ⚙️ Variables de entorno
 
-El archivo `.env` ya viene preconfigurado para desarrollo local. Solo necesitas rellenar `DATABASE_URL`.
+Copia `.env.example` a `.env`. Con el setup local (Docker), solo necesitas ejecutar `setup.sh` — el `.env` ya viene configurado para la DB local.
 
 | Variable | Obligatoria | Descripción |
 |---|---|---|
-| `DATABASE_URL` | ✅ Sí | Connection string de Supabase Postgres |
-| `NEXTAUTH_URL` | ✅ Sí | Ya configurada: `http://localhost:3000` |
-| `NEXTAUTH_SECRET` | ✅ Sí | Ya generada automáticamente |
-| `GOOGLE_CLIENT_ID` | ❌ No | Para login con Google (opcional) |
-| `GOOGLE_CLIENT_SECRET` | ❌ No | Para login con Google (opcional) |
-| `CARTOCIUDAD_BASE_URL` | ✅ Sí | Ya configurada (API gratuita) |
-| `CLOUDFLARE_R2_*` | ❌ No | Para subir imágenes (opcional en dev) |
-| `RESEND_API_KEY` | ❌ No | Emails se muestran en consola en dev |
-| `SENTRY_*` | ❌ No | Monitorización (opcional en dev) |
+| `DATABASE_URL` | ✅ | Connection string PostgreSQL (local o Supabase cloud) |
+| `NEXTAUTH_URL` | ✅ | URL base de la app (`http://localhost:3000` en dev) |
+| `NEXTAUTH_SECRET` | ✅ | Secret para Auth.js (generar con `openssl rand -base64 32`) |
+| `GOOGLE_CLIENT_ID` | ❌ | Para login con Google (opcional) |
+| `GOOGLE_CLIENT_SECRET` | ❌ | Para login con Google (opcional) |
+| `CARTOCIUDAD_BASE_URL` | ✅ | Ya configurada (API gratuita del gobierno) |
+| `CLOUDFLARE_R2_*` | ❌ | Para subir imágenes (opcional en dev) |
+| `RESEND_API_KEY` | ❌ | Emails se muestran en consola en dev |
+| `SENTRY_*` | ❌ | Monitorización de errores (opcional en dev) |
 
 ---
 
-## 🚢 Despliegue en Vercel
+## 🚢 Despliegue
 
-### Paso 1: Conectar repositorio
+El proyecto tiene dos formas de desplegar: automática (GitHub Actions) y manual (script local).
 
-1. Ve a [vercel.com](https://vercel.com) → New Project
-2. Importa el repositorio de GitHub/GitLab
-3. Framework: Next.js (se detecta automáticamente)
+### Despliegue automático (CI/CD)
 
-### Paso 2: Configurar variables de entorno en Vercel
-
-En el panel de Vercel → Settings → Environment Variables, añade:
+Cada push a `main` ejecuta automáticamente:
 
 ```
-DATABASE_URL          = (tu connection string de Supabase — usa la de producción)
-NEXTAUTH_URL          = https://tu-dominio.vercel.app
-NEXTAUTH_SECRET       = (genera uno nuevo con: openssl rand -base64 32)
-GOOGLE_CLIENT_ID      = (si quieres login con Google)
-GOOGLE_CLIENT_SECRET  = (si quieres login con Google)
-CARTOCIUDAD_BASE_URL  = https://www.cartociudad.es/geocoder/api/geocoder
-CLOUDFLARE_R2_*       = (credenciales de R2 para imágenes)
-RESEND_API_KEY        = (API key de Resend para emails reales)
-SENTRY_DSN            = (DSN de Sentry)
+CI (lint + type-check + tests) → Migraciones Prisma → Deploy a Vercel
 ```
 
-### Paso 3: Ejecutar migraciones en producción
+También puedes disparar un deploy manual desde **GitHub Actions → Deploy → Run workflow**, eligiendo entorno (`staging` o `production`) y si ejecutar el seed.
 
-Desde tu terminal local, apuntando a la DB de producción:
+Ver [DEPLOYMENT.md](DEPLOYMENT.md) para la configuración completa de secrets y environments en GitHub.
+
+### Despliegue manual (script local)
 
 ```bash
-DATABASE_URL="tu-url-de-produccion" pnpm prisma migrate deploy
+# Desplegar a staging
+./scripts/deploy.sh staging
+
+# Desplegar a producción
+./scripts/deploy.sh production
 ```
 
-### Paso 4: Seed de datos (opcional)
+El script ejecuta: verificación de rama → lint → type-check → tests → build → migraciones Prisma → deploy a Vercel.
 
-```bash
-DATABASE_URL="tu-url-de-produccion" pnpm prisma:seed
-```
+### Configurar Vercel
 
-### Paso 5: Desplegar
+1. Conecta el repo en [vercel.com/new](https://vercel.com/new)
+2. Configura las variables de entorno en Vercel → Settings → Environment Variables:
 
-Vercel despliega automáticamente con cada push a `main`. O haz deploy manual desde el panel.
+| Variable | Valor |
+|---|---|
+| `DATABASE_URL` | Connection string de Supabase producción |
+| `NEXTAUTH_URL` | `https://tu-dominio.vercel.app` |
+| `NEXTAUTH_SECRET` | Generar con `openssl rand -base64 32` |
+| `CARTOCIUDAD_BASE_URL` | `https://www.cartociudad.es/geocoder/api/geocoder` |
+| `SENTRY_DSN` | DSN de tu proyecto Sentry |
+| `NEXT_PUBLIC_SENTRY_DSN` | Mismo valor que `SENTRY_DSN` |
+| `SENTRY_AUTH_TOKEN` | Token de Sentry para source maps |
+| `SENTRY_ORG` | Slug de tu organización en Sentry |
+| `SENTRY_PROJECT` | Slug de tu proyecto en Sentry |
+
+### Configurar Supabase (producción)
+
+1. Crea un proyecto en [supabase.com](https://supabase.com)
+2. Copia la connection string (Settings → Database → URI)
+3. Aplica migraciones: `DATABASE_URL="tu-url-prod" npx prisma migrate deploy`
+4. (Opcional) Seed: `DATABASE_URL="tu-url-prod" pnpm prisma:seed`
 
 ---
 
 ## 🗂️ Estructura del proyecto
 
 ```
-pueblo-delivery/
+monte-delivery/
+├── .github/workflows/     # CI/CD (ci.yml + deploy.yml)
 ├── prisma/
 │   ├── schema.prisma      # Schema de 21 tablas
-│   └── seed.ts            # Datos de prueba
+│   ├── migrations/        # Migraciones SQL
+│   └── seed.ts            # Datos de prueba (TypeScript)
+├── scripts/
+│   ├── setup.sh           # Setup local (Supabase + migraciones + seed)
+│   └── deploy.sh          # Deploy manual (staging/production)
+├── supabase/
+│   ├── config.toml        # Config de Supabase local (Docker)
+│   └── seed.sql           # Datos de prueba (SQL, usado por setup.sh)
 ├── src/
 │   ├── app/               # Next.js App Router
-│   │   ├── (public)/      # Home, restaurantes, auth, ayuda
+│   │   ├── (public)/      # Home, restaurantes, auth
 │   │   ├── (customer)/    # Carrito, checkout, pedidos, perfil
 │   │   ├── (restaurant)/  # Panel de restaurante
 │   │   ├── (admin)/       # Panel de administración
 │   │   └── api/           # API Routes
-│   ├── components/        # Componentes React
-│   │   ├── ui/            # Button, Input, Card, Dialog, Badge, Tabs
-│   │   ├── layout/        # Header, BottomNav, AppShell
-│   │   ├── restaurant/    # RestaurantCard, RestaurantFilters
-│   │   ├── product/       # ProductCard, AllergenBadge
-│   │   ├── cart/          # CartItem, CartSummary, FABCart
-│   │   ├── order/         # OrderTimeline, ETADisplay
-│   │   └── legal/         # CookieBanner
+│   ├── components/        # Componentes React (ui, layout, cart, etc.)
 │   ├── lib/               # Lógica de negocio
 │   │   ├── domain/        # Funciones puras (FSM, ETA, Haversine, Slots)
 │   │   ├── services/      # Geocoding, Email, Storage, Audit
@@ -217,10 +226,9 @@ pueblo-delivery/
 │   │   └── validators/    # Schemas Zod
 │   ├── hooks/             # useCart, usePolling, useAddressSearch
 │   └── types/             # Tipos compartidos
-├── public/
-│   └── allergen-icons/    # 14 SVGs de alérgenos UE
-├── .env                   # Variables de entorno (NO commitear)
-├── .env.example           # Plantilla de variables
+├── public/allergen-icons/  # 14 SVGs de alérgenos UE
+├── DEPLOYMENT.md           # Guía de CI/CD y secrets de GitHub
+├── .env.example            # Plantilla de variables de entorno
 └── package.json
 ```
 
@@ -229,19 +237,22 @@ pueblo-delivery/
 ## 🐛 Solución de problemas
 
 ### "Error: connect ECONNREFUSED" al ejecutar migraciones
-→ Verifica que `DATABASE_URL` en `.env` es correcta. Comprueba que no hay espacios ni saltos de línea.
+→ Si usas Supabase local, verifica que Docker está corriendo y ejecuta `supabase start`. Si usas Supabase cloud, verifica la `DATABASE_URL` en `.env`.
 
 ### "Error: P1001: Can't reach database server"
-→ Tu IP puede estar bloqueada en Supabase. Ve a Settings → Database → Network y verifica que tu IP está permitida (o activa "Allow all IPs" para desarrollo).
+→ Tu IP puede estar bloqueada en Supabase cloud. Ve a Settings → Database → Network y verifica que tu IP está permitida.
 
 ### "Error: relation does not exist"
-→ No has ejecutado las migraciones. Ejecuta `pnpm prisma migrate dev --name init`.
+→ No has ejecutado las migraciones. Ejecuta `npx prisma migrate deploy`.
 
 ### "Error: Unique constraint failed on the fields: (`email`)"
-→ El seed ya se ejecutó antes. Puedes ignorar el error o resetear la DB con `pnpm prisma migrate reset`.
+→ El seed ya se ejecutó antes. Puedes ignorar el error o resetear la DB.
 
 ### El login con Google no funciona
-→ Es opcional. Necesitas configurar `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET` en `.env`. Para desarrollo, usa el login con email/password.
+→ Es opcional. Configura `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET` en `.env`. Para desarrollo, usa email/password.
 
 ### Los emails no llegan
-→ En desarrollo, los emails se muestran en la **consola del servidor** (terminal donde ejecutas `pnpm dev`). Para emails reales, configura `RESEND_API_KEY`.
+→ En desarrollo local, los emails se muestran en la consola del servidor. Para emails reales, configura `RESEND_API_KEY`.
+
+### Supabase local no arranca
+→ Verifica que Docker está corriendo. Ejecuta `docker ps` para ver los contenedores. Si hay conflictos de puertos, para los contenedores existentes con `supabase stop`.

@@ -1,184 +1,168 @@
-# Deployment Guide
+# Guía de Despliegue — Pueblo Delivery
 
-This document covers the CI/CD pipeline configuration for monte-delivery. The pipeline uses two GitHub Actions workflows — one for continuous integration and one for deployment to Vercel.
-
-## Table of Contents
-
-- [Prerequisites](#prerequisites)
-- [GitHub Secrets](#github-secrets)
-- [GitHub Environments](#github-environments)
-- [CI Workflow](#ci-workflow)
-- [Deploy Workflow](#deploy-workflow)
-- [Manual Deployments](#manual-deployments)
-- [Running the Seed Script](#running-the-seed-script)
-
-## Prerequisites
-
-- A GitHub repository with Actions enabled
-- A Vercel account with a linked project
-- A Supabase PostgreSQL database (one per environment)
-- Node.js 20 and pnpm (managed automatically in CI via `packageManager` field in `package.json`)
-
-## GitHub Secrets
-
-The pipeline requires secrets at two levels: **repository-level** (shared across all jobs) and **environment-level** (scoped to a specific deployment target).
-
-### Repository-Level Secrets
-
-Configure these under **Settings → Secrets and variables → Actions → Repository secrets**:
-
-| Secret | Used By | Description |
-|---|---|---|
-| `VERCEL_TOKEN` | Deploy job | Personal access token for the Vercel CLI. Generate one at [vercel.com/account/tokens](https://vercel.com/account/tokens). |
-| `VERCEL_ORG_ID` | Deploy job | Your Vercel team/org ID. Found in your Vercel project settings or in `.vercel/project.json` after running `vercel link`. |
-| `VERCEL_PROJECT_ID` | Deploy job | Your Vercel project ID. Found in the same location as `VERCEL_ORG_ID`. |
-| `NEXTAUTH_URL` | Quality gate (build) | The canonical URL of the application (e.g., `https://monte-delivery.vercel.app`). Used by Auth.js at build time. |
-| `NEXTAUTH_SECRET` | Quality gate (build) | A random string used by Auth.js to encrypt session tokens. Generate one with `openssl rand -base64 32`. |
-| `SENTRY_DSN` | Quality gate (build) | Sentry Data Source Name for server-side error reporting. Found in your Sentry project settings under **Client Keys (DSN)**. |
-| `NEXT_PUBLIC_SENTRY_DSN` | Quality gate (build) | Sentry DSN exposed to the browser. Typically the same value as `SENTRY_DSN`. |
-| `SENTRY_AUTH_TOKEN` | Quality gate (build) | Sentry authentication token for source map uploads. Create one at [sentry.io/settings/auth-tokens](https://sentry.io/settings/auth-tokens/) with `project:releases` and `org:read` scopes. |
-| `SENTRY_ORG` | Quality gate (build) | Your Sentry organization slug (visible in the URL: `sentry.io/organizations/<slug>/`). |
-| `SENTRY_PROJECT` | Quality gate (build) | Your Sentry project slug (visible in the project settings URL). |
-
-### Environment-Level Secrets
-
-Configure these under **Settings → Environments → (select environment) → Environment secrets**:
-
-| Secret | Environments | Used By | Description |
-|---|---|---|---|
-| `DATABASE_URL` | `staging`, `production` | Quality gate (build), Migration job, Seed job | Supabase PostgreSQL connection string. Each environment must point to its own database. |
-
-The `DATABASE_URL` is environment-scoped so that staging and production deployments connect to separate databases.
-
-## GitHub Environments
-
-The deploy workflow uses [GitHub Environments](https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment) to scope secrets and (optionally) add protection rules per deployment target.
-
-### Setting Up Environments
-
-1. Go to **Settings → Environments** in your GitHub repository.
-2. Create two environments: **`staging`** and **`production`**.
-3. For each environment, add the `DATABASE_URL` secret with the connection string for that environment's database.
-
-### Optional Protection Rules
-
-You can add protection rules to either environment:
-
-- **Required reviewers** — Require one or more approvals before a deployment proceeds. Useful for `production`.
-- **Wait timer** — Add a delay before the deployment starts.
-- **Deployment branches** — Restrict which branches can deploy to the environment (e.g., only `main` can deploy to `production`).
-
-## CI Workflow
-
-**File:** `.github/workflows/ci.yml`
-
-The CI workflow validates code quality on every push and pull request.
-
-### Triggers
-
-| Event | Branches |
-|---|---|
-| `push` | `main`, `develop` |
-| `pull_request` | `main`, `develop` |
-
-### What It Runs
-
-The workflow runs a single `quality` job with these steps in sequence:
-
-1. **Checkout** — Clones the repository
-2. **Setup pnpm** — Installs pnpm (version auto-detected from `packageManager` in `package.json`)
-3. **Setup Node** — Installs Node.js 20 with pnpm dependency caching
-4. **Install dependencies** — `pnpm install --frozen-lockfile`
-5. **Lint** — `pnpm run lint`
-6. **Type-check** — `npx tsc --noEmit`
-7. **Unit tests** — `pnpm run test` (includes property-based tests via fast-check)
-
-### Concurrency
-
-Uses the concurrency group `ci-<branch>` with `cancel-in-progress: true`. If a new push arrives while a CI run is in progress on the same branch, the older run is cancelled automatically.
-
-## Deploy Workflow
-
-**File:** `.github/workflows/deploy.yml`
-
-The deploy workflow handles the full deployment pipeline: quality checks, database migrations, optional seeding, and Vercel deployment.
-
-### Triggers
-
-| Event | Condition |
-|---|---|
-| `push` | To the `main` branch |
-| `workflow_dispatch` | Manual trigger with environment and seed options |
-
-### Job Chain
-
-The workflow runs four jobs in sequence. Each job depends on the previous one succeeding:
+## Arquitectura
 
 ```
-quality-gate → migrate → seed (conditional) → deploy
+┌──────────────────┐     ┌──────────────────────────────┐
+│   Vercel          │     │   Supabase                    │
+│   (Frontend)      │────▶│   (PostgreSQL)                │
+│                   │     │                                │
+│   - Next.js SSR   │     │   - Base de datos              │
+│   - API Routes    │     │   - Migraciones (Prisma)       │
+│   - Static Assets │     │                                │
+└──────────────────┘     └──────────────────────────────┘
 ```
 
-| Job | Depends On | Description |
-|---|---|---|
-| `quality-gate` | — | Runs lint, type-check, unit tests, and a production build |
-| `migrate` | `quality-gate` | Applies pending Prisma migrations via `npx prisma migrate deploy` |
-| `seed` | `migrate` | Runs `pnpm prisma:seed` (only on manual dispatch with `run_seed: true`) |
-| `deploy` | `migrate`, `seed` | Builds and deploys to Vercel using the CLI |
+---
 
-If any job fails, all downstream jobs are skipped. The `deploy` job runs if `migrate` succeeded and `seed` either succeeded or was skipped.
+## 1. Desarrollo local
 
-### Concurrency
+### Requisitos
 
-Uses the concurrency group `deploy-<branch>` with `cancel-in-progress: false`. Concurrent deployments are **queued**, not cancelled, to prevent partial deploys.
+- Node.js 20+, pnpm, Docker, Supabase CLI
 
-### Environment Selection
-
-- **Push to `main`** → deploys to `production` by default
-- **Manual dispatch** → deploys to the selected environment (`staging` or `production`)
-
-The Vercel CLI uses the `--prod` flag only for production deployments. Staging deployments create a preview URL.
-
-## Manual Deployments
-
-You can trigger a deployment manually without pushing code:
-
-1. Go to **Actions → Deploy** in your GitHub repository.
-2. Click **Run workflow**.
-3. Select the target branch (typically `main`).
-4. Choose the **environment**: `staging` or `production`.
-5. Optionally enable **Run seed script after migrations** (see below).
-6. Click **Run workflow**.
-
-The workflow will run the full pipeline: quality gate → migrations → (optional seed) → Vercel deploy.
-
-### Deployment Summary
-
-After a successful deployment, the workflow writes a summary to the GitHub Actions run page with:
-
-- **Deployment URL** — The Vercel URL where the app was deployed
-- **Environment** — The target environment (`staging` or `production`)
-- **Actor** — The GitHub user who triggered the deployment
-
-## Running the Seed Script
-
-The seed script (`prisma/seed.ts`) populates the database with initial data. It is **only available via manual dispatch** to prevent accidental seeding on regular pushes.
-
-### How to Run
-
-1. Go to **Actions → Deploy** in your GitHub repository.
-2. Click **Run workflow**.
-3. Select the target branch.
-4. Choose the target **environment**.
-5. Set **Run seed script after migrations** to `true`.
-6. Click **Run workflow**.
-
-The seed job runs after migrations complete successfully. It executes:
+### Setup
 
 ```bash
-npx prisma generate    # Generate the Prisma client
-pnpm prisma:seed       # Run the seed script
+pnpm install
+pnpm prisma generate
+chmod +x scripts/setup.sh
+./scripts/setup.sh    # Supabase local + migraciones + seed
+pnpm dev              # http://localhost:3000
 ```
 
-Both commands receive the `DATABASE_URL` from the selected environment's secrets.
+El script `setup.sh` levanta Supabase local con Docker (PostgreSQL en puerto 54322, Studio en 54323), aplica las migraciones de Prisma, y carga los datos de prueba.
 
-If the seed script fails, the deployment is halted — the Vercel deploy step will not run.
+### Parar servicios
+
+```bash
+supabase stop         # Para los contenedores Docker
+```
+
+### Resetear la base de datos
+
+```bash
+supabase stop
+./scripts/setup.sh    # Vuelve a levantar todo limpio
+```
+
+---
+
+## 2. CI/CD con GitHub Actions
+
+### Workflows
+
+| Workflow | Archivo | Trigger | Qué hace |
+|---|---|---|---|
+| **CI** | `.github/workflows/ci.yml` | Push/PR a `main` o `develop` | Lint + type-check + tests |
+| **Deploy** | `.github/workflows/deploy.yml` | Push a `main` o manual dispatch | Quality gate + migraciones + deploy a Vercel |
+
+### Pipeline de deploy
+
+```
+quality-gate → migrate → seed (opcional) → deploy
+```
+
+- **quality-gate**: lint, type-check, tests, build de producción
+- **migrate**: `npx prisma migrate deploy` contra la DB del entorno
+- **seed**: `pnpm prisma:seed` (solo en dispatch manual con `run_seed: true`)
+- **deploy**: build y deploy a Vercel con CLI
+
+### Concurrencia
+
+- **CI**: cancela runs anteriores en la misma rama (`cancel-in-progress: true`)
+- **Deploy**: encola (no cancela) para evitar deploys parciales (`cancel-in-progress: false`)
+
+---
+
+## 3. Secrets de GitHub
+
+### Secrets de repositorio
+
+Configurar en **Settings → Secrets and variables → Actions → Repository secrets**:
+
+| Secret | Usado por | Descripción |
+|---|---|---|
+| `VERCEL_TOKEN` | Deploy | Token de API de Vercel |
+| `VERCEL_ORG_ID` | Deploy | ID de organización en Vercel |
+| `VERCEL_PROJECT_ID` | Deploy | ID del proyecto en Vercel |
+| `NEXTAUTH_URL` | Build | URL canónica de la app |
+| `NEXTAUTH_SECRET` | Build | Secret de Auth.js (`openssl rand -base64 32`) |
+| `SENTRY_DSN` | Build | DSN de Sentry |
+| `NEXT_PUBLIC_SENTRY_DSN` | Build | DSN de Sentry (cliente) |
+| `SENTRY_AUTH_TOKEN` | Build | Token para subir source maps |
+| `SENTRY_ORG` | Build | Slug de organización en Sentry |
+| `SENTRY_PROJECT` | Build | Slug de proyecto en Sentry |
+
+### Secrets de entorno
+
+Configurar en **Settings → Environments → (staging/production) → Environment secrets**:
+
+| Secret | Entornos | Descripción |
+|---|---|---|
+| `DATABASE_URL` | `staging`, `production` | Connection string de Supabase PostgreSQL |
+
+---
+
+## 4. GitHub Environments
+
+1. Ir a **Settings → Environments**
+2. Crear dos entornos: **`staging`** y **`production`**
+3. En cada uno, añadir el secret `DATABASE_URL` con la connection string de su base de datos
+4. (Opcional) Añadir protección a `production`: required reviewers, deployment branches (`main`)
+
+---
+
+## 5. Deploy manual
+
+### Desde GitHub Actions
+
+1. Ir a **Actions → Deploy → Run workflow**
+2. Elegir rama, entorno (`staging` o `production`), y si ejecutar seed
+3. Click **Run workflow**
+
+### Desde terminal (script local)
+
+```bash
+./scripts/deploy.sh staging      # Despliega a staging
+./scripts/deploy.sh production   # Despliega a producción
+```
+
+El script verifica la rama, ejecuta quality checks, aplica migraciones, y despliega a Vercel.
+
+---
+
+## 6. Configurar Vercel (primera vez)
+
+1. Conectar el repo en [vercel.com/new](https://vercel.com/new)
+2. Framework: Next.js (auto-detectado)
+3. Añadir variables de entorno (ver sección de secrets arriba)
+4. Obtener `VERCEL_ORG_ID` y `VERCEL_PROJECT_ID` de `.vercel/project.json` tras ejecutar `vercel link`
+
+---
+
+## 7. Configurar Supabase producción (primera vez)
+
+1. Crear proyecto en [supabase.com](https://supabase.com)
+2. Copiar connection string: **Settings → Database → Connection string → URI**
+3. Aplicar migraciones:
+   ```bash
+   DATABASE_URL="tu-url-produccion" npx prisma migrate deploy
+   ```
+4. (Opcional) Cargar datos iniciales:
+   ```bash
+   DATABASE_URL="tu-url-produccion" pnpm prisma:seed
+   ```
+
+---
+
+## 8. Ejecutar seed en producción
+
+Solo disponible vía dispatch manual para evitar ejecuciones accidentales:
+
+1. **Actions → Deploy → Run workflow**
+2. Seleccionar entorno
+3. Activar **Run seed script after migrations**
+4. Click **Run workflow**
+
+El seed ejecuta `npx prisma generate` + `pnpm prisma:seed` con el `DATABASE_URL` del entorno seleccionado.

@@ -32,6 +32,8 @@ export default withSentryConfig(nextConfig, {
     deleteSourcemapsAfterUpload: true,
   },
 
-  // Automatically tree-shake Sentry logger statements to reduce bundle size
-  disableLogger: true,
+  // Tree-shake Sentry logger statements to reduce bundle size
+  bundleSizeOptimizations: {
+    excludeDebugStatements: true,
+  },
 });
