@@ -5,16 +5,11 @@ import { useCallback } from 'react';
 
 const CUISINE_TYPES = [
   { value: '', label: 'Todos' },
-  { value: 'Hamburguesas', label: 'Hamburguesas' },
-  { value: 'Pizza', label: 'Pizza' },
-  { value: 'Mediterránea', label: 'Mediterránea' },
-  { value: 'Japonesa', label: 'Japonesa' },
-  { value: 'Mexicana', label: 'Mexicana' },
-  { value: 'China', label: 'China' },
-  { value: 'India', label: 'India' },
-  { value: 'Kebab', label: 'Kebab' },
-  { value: 'Tradicional', label: 'Tradicional' },
-  { value: 'Tapas', label: 'Tapas' },
+  { value: 'hamburguesas', label: '🍔 Hamburguesas' },
+  { value: 'pizza', label: '🍕 Pizza' },
+  { value: 'tradicional', label: '🍲 Tradicional' },
+  { value: 'pollos', label: '🍗 Pollos' },
+  { value: 'fast_food', label: '🥙 Fast Food' },
 ];
 
 export default function RestaurantFilters() {
@@ -42,52 +37,61 @@ export default function RestaurantFilters() {
   );
 
   return (
-    <div className="mb-6 space-y-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-      <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
-        Filtros
-      </h2>
+    <div className="mb-8 space-y-4">
+      {/* Cuisine type pills */}
+      <div className="flex flex-wrap items-center gap-2">
+        {CUISINE_TYPES.map((ct) => {
+          const isActive = type === ct.value;
+          return (
+            <button
+              key={ct.value}
+              type="button"
+              onClick={() => updateParams('type', ct.value)}
+              className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+                isActive
+                  ? 'bg-green-600 text-white shadow-sm'
+                  : 'bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50 hover:ring-gray-300'
+              }`}
+            >
+              {ct.label}
+            </button>
+          );
+        })}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {/* Cuisine type */}
-        <div>
-          <label htmlFor="filter-type" className="block text-sm font-medium text-gray-600 mb-1">
-            Tipo de cocina
-          </label>
-          <select
-            id="filter-type"
-            value={type}
-            onChange={(e) => updateParams('type', e.target.value)}
-            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          >
-            {CUISINE_TYPES.map((ct) => (
-              <option key={ct.value} value={ct.value}>
-                {ct.label}
-              </option>
-            ))}
-          </select>
-        </div>
+        {/* Divider */}
+        <span className="mx-1 hidden h-6 w-px bg-gray-200 sm:block" />
 
         {/* Open now toggle */}
-        <div className="flex items-end">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={isOpen}
-              onChange={(e) =>
-                updateParams('is_open', e.target.checked ? 'true' : '')
-              }
-              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-            />
-            <span className="text-sm font-medium text-gray-700">
-              Abierto ahora
-            </span>
-          </label>
-        </div>
+        <button
+          type="button"
+          onClick={() => updateParams('is_open', isOpen ? '' : 'true')}
+          className={`flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+            isOpen
+              ? 'bg-green-600 text-white shadow-sm'
+              : 'bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50 hover:ring-gray-300'
+          }`}
+        >
+          <span
+            className={`inline-block h-2 w-2 rounded-full ${
+              isOpen ? 'bg-white' : 'bg-green-500'
+            }`}
+          />
+          Abierto ahora
+        </button>
+      </div>
 
+      {/* Range filters row */}
+      <div className="flex flex-wrap items-center gap-6">
         {/* Max delivery fee */}
-        <div>
-          <label htmlFor="filter-delivery-fee" className="block text-sm font-medium text-gray-600 mb-1">
-            Envío máximo: {maxDeliveryFee ? `${maxDeliveryFee} €` : 'Sin límite'}
+        <div className="flex items-center gap-3">
+          <label
+            htmlFor="filter-delivery-fee"
+            className="whitespace-nowrap text-sm text-gray-600"
+          >
+            Envío máx:{' '}
+            <span className="font-semibold text-gray-900">
+              {maxDeliveryFee ? `${maxDeliveryFee} €` : 'Sin límite'}
+            </span>
           </label>
           <input
             id="filter-delivery-fee"
@@ -102,18 +106,20 @@ export default function RestaurantFilters() {
                 e.target.value === '10' ? '' : e.target.value
               )
             }
-            className="w-full accent-blue-600"
+            className="w-28 accent-green-600"
           />
-          <div className="flex justify-between text-xs text-gray-400">
-            <span>0 €</span>
-            <span>10 €</span>
-          </div>
         </div>
 
         {/* Max min order */}
-        <div>
-          <label htmlFor="filter-min-order" className="block text-sm font-medium text-gray-600 mb-1">
-            Pedido mínimo máx.: {maxMinOrder ? `${maxMinOrder} €` : 'Sin límite'}
+        <div className="flex items-center gap-3">
+          <label
+            htmlFor="filter-min-order"
+            className="whitespace-nowrap text-sm text-gray-600"
+          >
+            Pedido mín. máx:{' '}
+            <span className="font-semibold text-gray-900">
+              {maxMinOrder ? `${maxMinOrder} €` : 'Sin límite'}
+            </span>
           </label>
           <input
             id="filter-min-order"
@@ -128,12 +134,8 @@ export default function RestaurantFilters() {
                 e.target.value === '30' ? '' : e.target.value
               )
             }
-            className="w-full accent-blue-600"
+            className="w-28 accent-green-600"
           />
-          <div className="flex justify-between text-xs text-gray-400">
-            <span>0 €</span>
-            <span>30 €</span>
-          </div>
         </div>
       </div>
     </div>

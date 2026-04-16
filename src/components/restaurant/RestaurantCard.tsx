@@ -1,29 +1,114 @@
 import Link from 'next/link';
+import Image from 'next/image';
 import type { RestaurantDTO } from '@/types';
 
 interface RestaurantCardProps {
-  restaurant: RestaurantDTO;
+  readonly restaurant: RestaurantDTO;
+}
+
+const CUISINE_EMOJIS: Record<string, string> = {
+  hamburguesas: '🍔',
+  tradicional: '🍲',
+  pizza: '🍕',
+  pollos: '🍗',
+  fast_food: '🥙',
+};
+
+const CUISINE_LABELS: Record<string, string> = {
+  hamburguesas: 'Hamburguesas',
+  tradicional: 'Tradicional',
+  pizza: 'Pizza',
+  pollos: 'Pollos',
+  fast_food: 'Fast Food',
+};
+
+const CUISINE_COLORS: Record<string, string> = {
+  hamburguesas: 'from-amber-400 to-orange-500',
+  tradicional: 'from-red-400 to-rose-500',
+  pizza: 'from-green-400 to-emerald-500',
+  pollos: 'from-yellow-400 to-amber-500',
+  fast_food: 'from-purple-400 to-indigo-500',
+};
+
+function hasRealImage(imageUrl: string | null): boolean {
+  return !!imageUrl && !imageUrl.startsWith('/placeholder');
 }
 
 export default function RestaurantCard({ restaurant }: RestaurantCardProps) {
+  const emoji = CUISINE_EMOJIS[restaurant.cuisineType ?? ''] ?? '🍽️';
+  const gradient =
+    CUISINE_COLORS[restaurant.cuisineType ?? ''] ?? 'from-gray-400 to-gray-500';
+  const cuisineLabel =
+    CUISINE_LABELS[restaurant.cuisineType ?? ''] ?? restaurant.cuisineType;
+  const showImage = hasRealImage(restaurant.imageUrl);
+
   return (
     <Link
       href={`/restaurante/${restaurant.slug}`}
-      className="group block overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm transition-shadow hover:shadow-md"
+      className={`group block overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-gray-200 transition-all duration-200 hover:shadow-xl hover:-translate-y-1 ${
+        !restaurant.isOpen ? 'opacity-75' : ''
+      }`}
     >
-      {/* Image */}
-      <div className="relative aspect-[16/10] w-full overflow-hidden bg-gray-100">
-        {restaurant.imageUrl ? (
-          <img
-            src={restaurant.imageUrl}
-            alt={`Imagen de ${restaurant.name}`}
-            className="h-full w-full object-cover transition-transform group-hover:scale-105"
-            loading="lazy"
+      {/* Image area */}
+      <div className="relative aspect-[16/10] w-full overflow-hidden">
+        {showImage ? (
+          <Image
+            src={restaurant.imageUrl!}
+            alt={restaurant.name}
+            fill
+            unoptimized
+            className="object-cover transition-transform duration-300 group-hover:scale-105"
+            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
           />
         ) : (
-          <div className="flex h-full w-full items-center justify-center text-gray-400">
+          <div
+            className={`flex h-full w-full items-center justify-center bg-gradient-to-br ${gradient}`}
+          >
+            <span className="text-6xl drop-shadow-lg">{emoji}</span>
+          </div>
+        )}
+
+        {/* Dark overlay for text readability */}
+        {showImage && (
+          <div className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent" />
+        )}
+
+        {/* Open/Closed badge */}
+        <span
+          className={`absolute top-3 right-3 flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold shadow-md backdrop-blur-sm ${
+            restaurant.isOpen
+              ? 'bg-green-500/90 text-white'
+              : 'bg-gray-800/80 text-gray-200'
+          }`}
+        >
+          <span
+            className={`inline-block h-1.5 w-1.5 rounded-full ${
+              restaurant.isOpen ? 'bg-white' : 'bg-red-400'
+            }`}
+          />
+          {restaurant.isOpen ? 'Abierto' : 'Cerrado'}
+        </span>
+      </div>
+
+      {/* Content */}
+      <div className="p-4">
+        <div className="flex items-start justify-between gap-2">
+          <h3 className="text-base font-bold text-gray-900 group-hover:text-green-600 truncate leading-tight">
+            {restaurant.name}
+          </h3>
+        </div>
+
+        {restaurant.cuisineType && (
+          <span className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600">
+            <span aria-hidden="true">{emoji}</span>
+            {cuisineLabel}
+          </span>
+        )}
+
+        <div className="mt-3 flex items-center gap-3 border-t border-gray-100 pt-3 text-xs text-gray-500">
+          <span className="flex items-center gap-1">
             <svg
-              className="h-12 w-12"
+              className="h-3.5 w-3.5 text-gray-400"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -33,45 +118,13 @@ export default function RestaurantCard({ restaurant }: RestaurantCardProps) {
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 strokeWidth={1.5}
-                d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1"
+                d="M8.25 18.75a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 0 1-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0H21M3.375 14.25h-.375a3 3 0 0 1-3-3V8.25m19.5 0a3 3 0 0 0-3-3h-1.5m-9 0H3.375m0 0A1.125 1.125 0 0 0 2.25 6.375v4.875"
               />
             </svg>
-          </div>
-        )}
-
-        {/* Open/Closed badge */}
-        <span
-          className={`absolute top-2 right-2 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-            restaurant.isOpen
-              ? 'bg-green-100 text-green-800'
-              : 'bg-red-100 text-red-800'
-          }`}
-        >
-          {restaurant.isOpen ? 'Abierto' : 'Cerrado'}
-        </span>
-      </div>
-
-      {/* Content */}
-      <div className="p-3">
-        <h3 className="text-base font-semibold text-gray-900 group-hover:text-blue-600 truncate">
-          {restaurant.name}
-        </h3>
-
-        {restaurant.cuisineType && (
-          <p className="mt-0.5 text-sm text-gray-500">{restaurant.cuisineType}</p>
-        )}
-
-        <div className="mt-2 flex items-center gap-3 text-sm text-gray-600">
-          <span className="flex items-center gap-1">
-            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8.25 18.75a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 0 1-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0H21M3.375 14.25h.008M21 12.75V6.375c0-.621-.504-1.125-1.125-1.125H5.25c-.621 0-1.125.504-1.125 1.125v8.25" />
-            </svg>
-            {restaurant.deliveryFeeEur.toFixed(2)} €
+            Envío {restaurant.deliveryFeeEur.toFixed(2)} €
           </span>
-          <span className="text-gray-300">|</span>
-          <span>
-            Mín. {restaurant.minOrderEur.toFixed(2)} €
-          </span>
+          <span className="text-gray-300">·</span>
+          <span>Mín. {restaurant.minOrderEur.toFixed(2)} €</span>
         </div>
       </div>
     </Link>

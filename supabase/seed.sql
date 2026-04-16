@@ -51,11 +51,11 @@ INSERT INTO users (id, name, email, "emailVerified", "passwordHash", image, role
 -- ─── 3. Restaurants (5 in Andalucía) ─────────────────────────────────────────
 
 INSERT INTO restaurants (id, name, slug, description, "imageUrl", "cuisineType", "deliveryFeeEur", "minOrderEur", "deliveryRadiusKm", lat, lng, "isActive", "createdAt", "updatedAt") VALUES
-('rest-001', 'Hamburguesería Sa Plaça', 'hamburgueseria-sa-placa', 'Las mejores hamburguesas artesanales del pueblo.',       '/placeholder-restaurant-1.jpg', 'hamburguesas', 2.00, 10.00, 5.0,  37.3886, -5.9823, true, now(), now()),
-('rest-002', 'Casa Tradición',          'casa-tradicion',          'Cocina tradicional andaluza con productos de la tierra.', '/placeholder-restaurant-2.jpg', 'tradicional',  1.50, 12.00, 4.0,  36.7213, -4.4214, true, now(), now()),
-('rest-003', 'Pizzería Forn Nou',       'pizzeria-forn-nou',       'Pizza artesanal al horno de leña.',                       '/placeholder-restaurant-3.jpg', 'pizza',        2.50,  8.00, 6.0,  36.8381, -4.7794, true, now(), now()),
-('rest-004', 'Pollos El Rincón',        'pollos-el-rincon',        'Pollo asado y platos de pollo para toda la familia.',     '/placeholder-restaurant-4.jpg', 'pollos',       1.00,  8.00, 3.5,  36.5298, -6.2926, true, now(), now()),
-('rest-005', 'Kebab Alhambra',          'kebab-alhambra',          'Kebabs, falafel y cocina mediterránea.',                  '/placeholder-restaurant-5.jpg', 'fast_food',    1.50,  6.00, 5.0,  37.1773, -3.5986, true, now(), now());
+('rest-001', 'Hamburguesería Sa Plaça', 'hamburgueseria-sa-placa', 'Las mejores hamburguesas artesanales del pueblo.',       'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=800&h=500&fit=crop', 'hamburguesas', 2.00, 10.00, 5.0,  37.3886, -5.9823, true, now(), now()),
+('rest-002', 'Casa Tradición',          'casa-tradicion',          'Cocina tradicional andaluza con productos de la tierra.', 'https://images.unsplash.com/photo-1515443961218-a51367888e4b?w=800&h=500&fit=crop', 'tradicional',  1.50, 12.00, 4.0,  36.7213, -4.4214, true, now(), now()),
+('rest-003', 'Pizzería Forn Nou',       'pizzeria-forn-nou',       'Pizza artesanal al horno de leña.',                       'https://images.unsplash.com/photo-1513104890138-7c749659a591?w=800&h=500&fit=crop', 'pizza',        2.50,  8.00, 6.0,  36.8381, -4.7794, true, now(), now()),
+('rest-004', 'Pollos El Rincón',        'pollos-el-rincon',        'Pollo asado y platos de pollo para toda la familia.',     'https://images.unsplash.com/photo-1598103442097-8b74394b95c6?w=800&h=500&fit=crop', 'pollos',       1.00,  8.00, 3.5,  36.5298, -6.2926, true, now(), now()),
+('rest-005', 'Kebab Alhambra',          'kebab-alhambra',          'Kebabs, falafel y cocina mediterránea.',                  'https://images.unsplash.com/photo-1529006557810-274b9b2fc783?w=800&h=500&fit=crop', 'fast_food',    1.50,  6.00, 5.0,  37.1773, -3.5986, true, now(), now());
 
 -- ─── 4. Restaurant Users (owners + staff) ───────────────────────────────────
 
