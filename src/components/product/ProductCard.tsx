@@ -1,3 +1,4 @@
+import Image from 'next/image';
 import AllergenBadge from './AllergenBadge';
 
 interface ProductAllergen {
@@ -8,7 +9,7 @@ interface ProductAllergen {
 }
 
 interface ProductCardProps {
-  product: {
+  readonly product: {
     id: string;
     name: string;
     description: string | null;
@@ -19,23 +20,37 @@ interface ProductCardProps {
   onAdd?: (productId: string) => void;
 }
 
+function isPlaceholder(url: string): boolean {
+  return url.startsWith('/placeholder');
+}
+
 export default function ProductCard({ product, onAdd }: ProductCardProps) {
+  const showImage = !isPlaceholder(product.imageUrl);
+
   return (
-    <div className="flex gap-3 rounded-lg border border-gray-200 bg-white p-3 shadow-sm sm:gap-4">
+    <div className="group flex gap-3 rounded-xl border border-gray-200 bg-white p-3 shadow-sm transition-shadow duration-200 hover:shadow-md sm:gap-4 sm:p-4">
       {/* Product image */}
-      <div className="h-24 w-24 flex-shrink-0 overflow-hidden rounded-md bg-gray-100 sm:h-28 sm:w-28">
-        <img
-          src={product.imageUrl}
-          alt={product.name}
-          className="h-full w-full object-cover"
-          loading="lazy"
-        />
+      <div className="relative h-24 w-24 flex-shrink-0 overflow-hidden rounded-lg bg-gray-100 sm:h-28 sm:w-28">
+        {showImage ? (
+          <Image
+            src={product.imageUrl}
+            alt={product.name}
+            fill
+            unoptimized
+            className="object-cover transition-transform duration-300 group-hover:scale-105"
+            sizes="112px"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-gray-100 to-gray-200">
+            <span className="text-4xl">🍽️</span>
+          </div>
+        )}
       </div>
 
       {/* Content */}
       <div className="flex flex-1 flex-col justify-between min-w-0">
         <div>
-          <h3 className="text-sm font-semibold text-gray-900 sm:text-base truncate">
+          <h3 className="text-sm font-bold text-gray-900 sm:text-base truncate">
             {product.name}
           </h3>
           {product.description && (
@@ -60,14 +75,14 @@ export default function ProductCard({ product, onAdd }: ProductCardProps) {
         </div>
 
         <div className="mt-2 flex items-center justify-between">
-          <span className="text-sm font-bold text-gray-900 sm:text-base">
+          <span className="text-sm font-bold text-green-600 sm:text-base">
             {product.priceEur.toFixed(2)} €
           </span>
           {onAdd && (
             <button
               type="button"
               onClick={() => onAdd(product.id)}
-              className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors sm:text-sm"
+              className="rounded-full bg-green-600 px-4 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 sm:text-sm"
             >
               Añadir
             </button>

@@ -1,3 +1,5 @@
+import Image from 'next/image';
+
 interface OpeningHourDisplay {
   dayOfWeek: number;
   dayName: string;
@@ -15,6 +17,10 @@ interface RestaurantDetailHeaderProps {
   minOrderEur: number;
   deliveryRadiusKm: number;
   openingHours: OpeningHourDisplay[];
+}
+
+function hasRealImage(imageUrl: string | null): boolean {
+  return !!imageUrl && !imageUrl.startsWith('/placeholder');
 }
 
 export default function RestaurantDetailHeader({
@@ -37,15 +43,21 @@ export default function RestaurantDetailHeader({
     {}
   );
 
+  const showImage = hasRealImage(imageUrl);
+
   return (
     <div>
       {/* Hero image */}
-      <div className="relative h-48 w-full overflow-hidden bg-gray-200 sm:h-64 lg:h-72">
-        {imageUrl ? (
-          <img
-            src={imageUrl}
+      <div className="relative h-56 w-full overflow-hidden bg-gray-200 sm:h-72 lg:h-80">
+        {showImage ? (
+          <Image
+            src={imageUrl!}
             alt={`Imagen de ${name}`}
-            className="h-full w-full object-cover"
+            fill
+            unoptimized
+            className="object-cover"
+            sizes="100vw"
+            priority
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-gray-400">
@@ -54,18 +66,20 @@ export default function RestaurantDetailHeader({
             </svg>
           </div>
         )}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
-        <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-6 lg:p-8">
-          <h1 className="text-2xl font-bold text-white sm:text-3xl">{name}</h1>
-          <div className="mt-1 flex items-center gap-2">
+        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+        <div className="absolute bottom-0 left-0 right-0 p-5 sm:p-7 lg:p-9">
+          <h1 className="text-3xl font-extrabold tracking-tight text-white sm:text-4xl lg:text-5xl drop-shadow-lg">
+            {name}
+          </h1>
+          <div className="mt-2 flex items-center gap-3">
             {cuisineType && (
-              <span className="text-sm text-white/80">{cuisineType}</span>
+              <span className="text-sm font-medium text-white/90 sm:text-base">{cuisineType}</span>
             )}
             <span
-              className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+              className={`rounded-full px-3 py-0.5 text-xs font-semibold shadow-sm ${
                 isOpen
-                  ? 'bg-green-100 text-green-800'
-                  : 'bg-red-100 text-red-800'
+                  ? 'bg-green-500/90 text-white'
+                  : 'bg-red-500/90 text-white'
               }`}
             >
               {isOpen ? 'Abierto' : 'Cerrado'}
@@ -75,8 +89,8 @@ export default function RestaurantDetailHeader({
       </div>
 
       {/* Info bar */}
-      <div className="border-b border-gray-200 bg-white px-4 py-4 sm:px-6 lg:px-8">
-        <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600 sm:gap-6">
+      <div className="border-b border-gray-200 bg-white px-4 py-5 sm:px-6 lg:px-8">
+        <div className="flex flex-wrap items-center gap-5 text-sm text-gray-600 sm:gap-6">
           <div className="flex items-center gap-1.5">
             <svg className="h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8.25 18.75a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 01-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0H21M3.375 14.25h.008" />
@@ -99,11 +113,11 @@ export default function RestaurantDetailHeader({
         </div>
 
         {/* Opening hours */}
-        <details className="mt-3">
-          <summary className="cursor-pointer text-sm font-medium text-blue-600 hover:text-blue-700">
+        <details className="mt-4">
+          <summary className="cursor-pointer text-sm font-medium text-green-600 hover:text-green-700">
             Ver horarios
           </summary>
-          <div className="mt-2 grid grid-cols-1 gap-1 text-sm text-gray-600 sm:grid-cols-2">
+          <div className="mt-3 grid grid-cols-1 gap-1.5 text-sm text-gray-600 sm:grid-cols-2">
             {[0, 1, 2, 3, 4, 5, 6].map((day) => {
               const hours = hoursByDay[day];
               const dayNames = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
