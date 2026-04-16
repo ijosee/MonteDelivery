@@ -9,7 +9,7 @@
 -- Run this AFTER migrations: psql $DATABASE_URL -f supabase/seed.sql
 --
 -- All passwords: Password123!
--- bcrypt hash: $2a$10$rQEY0tEMG9bPMvbyYkJPOuVRkWG0bHQsWQbJNcSGt1yNTQlGR1Wm2
+-- bcrypt hash: $2b$10$seJWVQSGNX1FF0oEO9VoUujJ2LRmVBuZ2FJYy6e5F5RLqjwE1H71m
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 -- ─── 1. Allergens (14 EU — Reglamento UE 1169/2011) ─────────────────────────
@@ -35,18 +35,18 @@ INSERT INTO allergens (id, code, "nameEs", icon) VALUES
 -- All with password: Password123!
 
 INSERT INTO users (id, name, email, "emailVerified", "passwordHash", image, role, "failedLoginAttempts", "lockedUntil", "createdAt", "updatedAt") VALUES
-('user-admin-001', 'Admin Pueblo',    'admin@pueblodelivery.es',  now(), '$2a$10$rQEY0tEMG9bPMvbyYkJPOuVRkWG0bHQsWQbJNcSGt1yNTQlGR1Wm2', NULL, 'ADMIN',            0, NULL, now(), now()),
-('user-owner-001', 'María García',    'maria@saplaça.es',         now(), '$2a$10$rQEY0tEMG9bPMvbyYkJPOuVRkWG0bHQsWQbJNcSGt1yNTQlGR1Wm2', NULL, 'RESTAURANT_OWNER', 0, NULL, now(), now()),
-('user-owner-002', 'Antonio López',   'antonio@casatradicion.es', now(), '$2a$10$rQEY0tEMG9bPMvbyYkJPOuVRkWG0bHQsWQbJNcSGt1yNTQlGR1Wm2', NULL, 'RESTAURANT_OWNER', 0, NULL, now(), now()),
-('user-owner-003', 'Carmen Ruiz',     'carmen@pizzeriaforn.es',   now(), '$2a$10$rQEY0tEMG9bPMvbyYkJPOuVRkWG0bHQsWQbJNcSGt1yNTQlGR1Wm2', NULL, 'RESTAURANT_OWNER', 0, NULL, now(), now()),
-('user-staff-001', 'Pedro Martínez',  'pedro@saplaça.es',         now(), '$2a$10$rQEY0tEMG9bPMvbyYkJPOuVRkWG0bHQsWQbJNcSGt1yNTQlGR1Wm2', NULL, 'RESTAURANT_STAFF', 0, NULL, now(), now()),
-('user-staff-002', 'Laura Fernández', 'laura@casatradicion.es',   now(), '$2a$10$rQEY0tEMG9bPMvbyYkJPOuVRkWG0bHQsWQbJNcSGt1yNTQlGR1Wm2', NULL, 'RESTAURANT_STAFF', 0, NULL, now(), now()),
-('user-staff-003', 'Javier Sánchez',  'javier@pizzeriaforn.es',   now(), '$2a$10$rQEY0tEMG9bPMvbyYkJPOuVRkWG0bHQsWQbJNcSGt1yNTQlGR1Wm2', NULL, 'RESTAURANT_STAFF', 0, NULL, now(), now()),
-('user-cust-001',  'Ana Moreno',      'ana@ejemplo.es',           now(), '$2a$10$rQEY0tEMG9bPMvbyYkJPOuVRkWG0bHQsWQbJNcSGt1yNTQlGR1Wm2', NULL, 'CUSTOMER',         0, NULL, now(), now()),
-('user-cust-002',  'Carlos Díaz',     'carlos@ejemplo.es',        now(), '$2a$10$rQEY0tEMG9bPMvbyYkJPOuVRkWG0bHQsWQbJNcSGt1yNTQlGR1Wm2', NULL, 'CUSTOMER',         0, NULL, now(), now()),
-('user-cust-003',  'Elena Torres',    'elena@ejemplo.es',         now(), '$2a$10$rQEY0tEMG9bPMvbyYkJPOuVRkWG0bHQsWQbJNcSGt1yNTQlGR1Wm2', NULL, 'CUSTOMER',         0, NULL, now(), now()),
-('user-cust-004',  'Miguel Romero',   'miguel@ejemplo.es',        now(), '$2a$10$rQEY0tEMG9bPMvbyYkJPOuVRkWG0bHQsWQbJNcSGt1yNTQlGR1Wm2', NULL, 'CUSTOMER',         0, NULL, now(), now()),
-('user-cust-005',  'Sofía Navarro',   'sofia@ejemplo.es',         now(), '$2a$10$rQEY0tEMG9bPMvbyYkJPOuVRkWG0bHQsWQbJNcSGt1yNTQlGR1Wm2', NULL, 'CUSTOMER',         0, NULL, now(), now());
+('user-admin-001', 'Admin Pueblo',    'admin@pueblodelivery.es',  now(), '$2b$10$seJWVQSGNX1FF0oEO9VoUujJ2LRmVBuZ2FJYy6e5F5RLqjwE1H71m', NULL, 'ADMIN',            0, NULL, now(), now()),
+('user-owner-001', 'María García',    'maria@saplaça.es',         now(), '$2b$10$seJWVQSGNX1FF0oEO9VoUujJ2LRmVBuZ2FJYy6e5F5RLqjwE1H71m', NULL, 'RESTAURANT_OWNER', 0, NULL, now(), now()),
+('user-owner-002', 'Antonio López',   'antonio@casatradicion.es', now(), '$2b$10$seJWVQSGNX1FF0oEO9VoUujJ2LRmVBuZ2FJYy6e5F5RLqjwE1H71m', NULL, 'RESTAURANT_OWNER', 0, NULL, now(), now()),
+('user-owner-003', 'Carmen Ruiz',     'carmen@pizzeriaforn.es',   now(), '$2b$10$seJWVQSGNX1FF0oEO9VoUujJ2LRmVBuZ2FJYy6e5F5RLqjwE1H71m', NULL, 'RESTAURANT_OWNER', 0, NULL, now(), now()),
+('user-staff-001', 'Pedro Martínez',  'pedro@saplaça.es',         now(), '$2b$10$seJWVQSGNX1FF0oEO9VoUujJ2LRmVBuZ2FJYy6e5F5RLqjwE1H71m', NULL, 'RESTAURANT_STAFF', 0, NULL, now(), now()),
+('user-staff-002', 'Laura Fernández', 'laura@casatradicion.es',   now(), '$2b$10$seJWVQSGNX1FF0oEO9VoUujJ2LRmVBuZ2FJYy6e5F5RLqjwE1H71m', NULL, 'RESTAURANT_STAFF', 0, NULL, now(), now()),
+('user-staff-003', 'Javier Sánchez',  'javier@pizzeriaforn.es',   now(), '$2b$10$seJWVQSGNX1FF0oEO9VoUujJ2LRmVBuZ2FJYy6e5F5RLqjwE1H71m', NULL, 'RESTAURANT_STAFF', 0, NULL, now(), now()),
+('user-cust-001',  'Ana Moreno',      'ana@ejemplo.es',           now(), '$2b$10$seJWVQSGNX1FF0oEO9VoUujJ2LRmVBuZ2FJYy6e5F5RLqjwE1H71m', NULL, 'CUSTOMER',         0, NULL, now(), now()),
+('user-cust-002',  'Carlos Díaz',     'carlos@ejemplo.es',        now(), '$2b$10$seJWVQSGNX1FF0oEO9VoUujJ2LRmVBuZ2FJYy6e5F5RLqjwE1H71m', NULL, 'CUSTOMER',         0, NULL, now(), now()),
+('user-cust-003',  'Elena Torres',    'elena@ejemplo.es',         now(), '$2b$10$seJWVQSGNX1FF0oEO9VoUujJ2LRmVBuZ2FJYy6e5F5RLqjwE1H71m', NULL, 'CUSTOMER',         0, NULL, now(), now()),
+('user-cust-004',  'Miguel Romero',   'miguel@ejemplo.es',        now(), '$2b$10$seJWVQSGNX1FF0oEO9VoUujJ2LRmVBuZ2FJYy6e5F5RLqjwE1H71m', NULL, 'CUSTOMER',         0, NULL, now(), now()),
+('user-cust-005',  'Sofía Navarro',   'sofia@ejemplo.es',         now(), '$2b$10$seJWVQSGNX1FF0oEO9VoUujJ2LRmVBuZ2FJYy6e5F5RLqjwE1H71m', NULL, 'CUSTOMER',         0, NULL, now(), now());
 
 -- ─── 3. Restaurants (5 in Andalucía) ─────────────────────────────────────────
 
