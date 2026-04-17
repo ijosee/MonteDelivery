@@ -30,7 +30,7 @@ export default function CookieBanner() {
   useEffect(() => {
     const stored = localStorage.getItem(CONSENT_STORAGE_KEY);
     if (!stored) {
-      setVisible(true);
+      queueMicrotask(() => setVisible(true));
     }
   }, []);
 

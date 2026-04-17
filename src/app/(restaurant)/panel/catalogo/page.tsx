@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import Image from 'next/image';
 import { EU_ALLERGENS } from '@/lib/domain/allergens';
 
 interface Category {
@@ -401,7 +402,7 @@ export default function CatalogManagementPage() {
                       <div key={prod.id} className="flex items-center gap-3 p-3">
                         <div className="w-12 h-12 rounded bg-gray-200 overflow-hidden shrink-0">
                           {prod.imageUrl && (
-                            <img src={prod.imageUrl} alt={prod.name} className="w-full h-full object-cover" />
+                            <Image src={prod.imageUrl} alt={prod.name} className="w-full h-full object-cover" width={48} height={48} />
                           )}
                         </div>
                         <div className="flex-1 min-w-0">

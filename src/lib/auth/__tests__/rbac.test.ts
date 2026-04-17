@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { hasPermission, requirePermission, ROLE_PERMISSIONS } from '../rbac';
-import type { Permission } from '../rbac';
 
 describe('RBAC', () => {
   describe('hasPermission', () => {

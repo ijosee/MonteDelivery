@@ -1,6 +1,5 @@
 import { notFound } from 'next/navigation';
 import { prisma } from '@/lib/db';
-import ProductCard from '@/components/product/ProductCard';
 import RestaurantDetailHeader from './RestaurantDetailHeader';
 import CategoryTabs from './CategoryTabs';
 
