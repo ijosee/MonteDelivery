@@ -87,24 +87,24 @@ export default async function RestaurantDetailPage({
   const isOpen = isRestaurantOpen(restaurant.openingHours, now);
   const nextOpeningTime = isOpen ? null : getNextOpeningTime(restaurant.openingHours, now);
 
-  const openingHoursFormatted = restaurant.openingHours.map((h) => ({
+  const openingHoursFormatted = restaurant.openingHours.map((h: typeof restaurant.openingHours[number]) => ({
     dayOfWeek: h.dayOfWeek,
     dayName: DAY_NAMES[h.dayOfWeek],
     openTime: h.openTime,
     closeTime: h.closeTime,
   }));
 
-  const categories = restaurant.categories.map((cat) => ({
+  const categories = restaurant.categories.map((cat: typeof restaurant.categories[number]) => ({
     id: cat.id,
     name: cat.name,
     sortOrder: cat.sortOrder,
-    products: cat.products.map((p) => ({
+    products: cat.products.map((p: typeof cat.products[number]) => ({
       id: p.id,
       name: p.name,
       description: p.description,
       priceEur: Number(p.priceEur),
       imageUrl: p.imageUrl,
-      allergens: p.productAllergens.map((pa) => ({
+      allergens: p.productAllergens.map((pa: typeof p.productAllergens[number]) => ({
         id: pa.allergen.id,
         code: pa.allergen.code,
         nameEs: pa.allergen.nameEs,

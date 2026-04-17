@@ -3,6 +3,7 @@ import { auth } from '@/lib/auth/auth';
 import { prisma } from '@/lib/db';
 import { requirePermission } from '@/lib/auth/rbac';
 import type { UserRole } from '@/generated/prisma/client';
+import type { PrismaClient } from '@/generated/prisma/client';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,7 +47,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ data: null, error: 'Categoría no encontrada', success: false }, { status: 404 });
     }
 
-    const product = await prisma.$transaction(async (tx) => {
+    const product = await prisma.$transaction(async (tx: Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$use' | '$extends'>) => {
       const p = await tx.product.create({
         data: {
           categoryId,

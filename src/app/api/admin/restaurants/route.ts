@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       data: {
-        restaurants: restaurants.map((r) => ({
+        restaurants: restaurants.map((r: typeof restaurants[number]) => ({
           id: r.id,
           name: r.name,
           slug: r.slug,

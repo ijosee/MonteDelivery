@@ -99,7 +99,7 @@ export async function POST(
     sendOrderConfirmationEmail(session.user.email, {
       orderNumber: order.orderNumber,
       restaurantName: order.restaurant.name,
-      items: order.items.map((item) => ({
+      items: order.items.map((item: typeof order.items[number]) => ({
         name: item.productName,
         quantity: item.quantity,
         priceEur: Number(item.productPriceEur),

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import type { PrismaClient } from '@/generated/prisma/client';
 import { auth } from '@/lib/auth/auth';
 import { logAudit } from '@/lib/services/audit.service';
 
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest) {
     const anonymizedEmail = `deleted_${userId}@anonimizado.local`;
     const anonymizedName = 'Usuario eliminado';
 
-    await prisma.$transaction(async (tx) => {
+    await prisma.$transaction(async (tx: Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$use' | '$extends'>) => {
       // 1. Anonymize user record
       await tx.user.update({
         where: { id: userId },

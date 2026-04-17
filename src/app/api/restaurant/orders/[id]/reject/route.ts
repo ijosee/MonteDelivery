@@ -5,6 +5,7 @@ import { validateTransition } from '@/lib/domain/order-fsm';
 import { logAudit } from '@/lib/services/audit.service';
 import { requirePermission } from '@/lib/auth/rbac';
 import type { UserRole } from '@/generated/prisma/client';
+import type { PrismaClient } from '@/generated/prisma/client';
 
 export const dynamic = 'force-dynamic';
 
@@ -76,7 +77,7 @@ export async function POST(
       );
     }
 
-    const updated = await prisma.$transaction(async (tx) => {
+    const updated = await prisma.$transaction(async (tx: Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$use' | '$extends'>) => {
       const u = await tx.order.update({
         where: { id },
         data: { currentStatus: 'REJECTED' },

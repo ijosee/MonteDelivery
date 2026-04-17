@@ -61,7 +61,7 @@ export async function GET(request: NextRequest) {
     const now = new Date();
 
     // Map restaurants with isOpen status
-    let result = restaurants.map((r) => {
+    let result = restaurants.map((r: typeof restaurants[number]) => {
       const isOpen = isRestaurantOpen(r.openingHours, now);
       return {
         id: r.id,
@@ -78,11 +78,11 @@ export async function GET(request: NextRequest) {
 
     // Apply is_open filter (must be done in-memory since it depends on opening hours)
     if (isOpenFilter === 'true') {
-      result = result.filter((r) => r.isOpen);
+      result = result.filter((r: typeof result[number]) => r.isOpen);
     }
 
     // Sort: open restaurants first, then closed (Req 1.8)
-    result.sort((a, b) => {
+    result.sort((a: typeof result[number], b: typeof result[number]) => {
       if (a.isOpen === b.isOpen) return 0;
       return a.isOpen ? -1 : 1;
     });

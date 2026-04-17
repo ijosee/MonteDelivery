@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth/auth';
 import { prisma } from '@/lib/db';
+import type { PrismaClient } from '@/generated/prisma/client';
 import { validateTransition } from '@/lib/domain/order-fsm';
 import { logAudit } from '@/lib/services/audit.service';
 
@@ -61,7 +62,7 @@ export async function POST(
     }
 
     // Perform cancellation in a transaction
-    const updatedOrder = await prisma.$transaction(async (tx) => {
+    const updatedOrder = await prisma.$transaction(async (tx: Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$use' | '$extends'>) => {
       const updated = await tx.order.update({
         where: { id },
         data: { currentStatus: 'CANCELLED' },

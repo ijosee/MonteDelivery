@@ -73,7 +73,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       data: {
-        orders: orders.map((o) => ({
+        orders: orders.map((o: typeof orders[number]) => ({
           id: o.id,
           orderNumber: o.orderNumber,
           customerName: o.user.name,
@@ -87,7 +87,7 @@ export async function GET(request: NextRequest) {
           eta: o.eta?.toISOString() ?? null,
           phone: o.phone,
           address: o.address,
-          items: o.items.map((i) => ({
+          items: o.items.map((i: typeof o.items[number]) => ({
             productName: i.productName,
             productPriceEur: Number(i.productPriceEur),
             quantity: i.quantity,

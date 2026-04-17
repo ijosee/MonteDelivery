@@ -83,13 +83,13 @@ export async function GET(
           postalCode: order.address.postalCode,
           floorDoor: order.address.floorDoor,
         },
-        items: order.items.map((item) => ({
+        items: order.items.map((item: typeof order.items[number]) => ({
           id: item.id,
           productName: item.productName,
           productPriceEur: Number(item.productPriceEur),
           quantity: item.quantity,
         })),
-        statusHistory: order.statusHistory.map((h) => ({
+        statusHistory: order.statusHistory.map((h: typeof order.statusHistory[number]) => ({
           fromStatus: h.fromStatus,
           toStatus: h.toStatus,
           reason: h.reason,

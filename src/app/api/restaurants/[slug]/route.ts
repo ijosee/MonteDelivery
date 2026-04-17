@@ -125,29 +125,29 @@ export async function GET(
       deliveryRadiusKm: restaurant.deliveryRadiusKm,
       lat: restaurant.lat,
       lng: restaurant.lng,
-      openingHours: restaurant.openingHours.map((h) => ({
+      openingHours: restaurant.openingHours.map((h: typeof restaurant.openingHours[number]) => ({
         dayOfWeek: h.dayOfWeek,
         dayName: DAY_NAMES[h.dayOfWeek],
         openTime: h.openTime,
         closeTime: h.closeTime,
       })),
-      deliveryZones: restaurant.deliveryZones.map((z) => ({
+      deliveryZones: restaurant.deliveryZones.map((z: typeof restaurant.deliveryZones[number]) => ({
         radiusKm: z.radiusKm,
         lat: z.lat,
         lng: z.lng,
       })),
-      categories: restaurant.categories.map((cat) => ({
+      categories: restaurant.categories.map((cat: typeof restaurant.categories[number]) => ({
         id: cat.id,
         name: cat.name,
         sortOrder: cat.sortOrder,
-        products: cat.products.map((p) => ({
+        products: cat.products.map((p: typeof cat.products[number]) => ({
           id: p.id,
           name: p.name,
           description: p.description,
           priceEur: Number(p.priceEur),
           imageUrl: p.imageUrl,
           isAvailable: p.isAvailable,
-          allergens: p.productAllergens.map((pa) => ({
+          allergens: p.productAllergens.map((pa: typeof p.productAllergens[number]) => ({
             id: pa.allergen.id,
             code: pa.allergen.code,
             nameEs: pa.allergen.nameEs,

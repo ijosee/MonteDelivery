@@ -36,7 +36,7 @@ export async function GET() {
       orderBy: { role: 'asc' },
     });
 
-    const data = members.map((m) => ({
+    const data = members.map((m: typeof members[number]) => ({
       id: m.user.id,
       name: m.user.name,
       email: m.user.email,

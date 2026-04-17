@@ -140,7 +140,7 @@ async function getCartResponse(userId: string) {
   const cart = await prisma.cart.findUnique({
     where: { userId },
     include: {
-      restaurant: { select: { id: true, name: true } },
+      restaurant: { select: { id: true, name: true, deliveryFeeEur: true } },
       items: {
         include: {
           product: {
@@ -153,10 +153,10 @@ async function getCartResponse(userId: string) {
   });
 
   if (!cart) {
-    return { id: null, restaurantId: null, restaurantName: null, items: [], subtotalEur: 0 };
+    return { id: null, restaurantId: null, restaurantName: null, deliveryFeeEur: null, items: [], subtotalEur: 0 };
   }
 
-  const items = cart.items.map((item) => ({
+  const items = cart.items.map((item: typeof cart.items[number]) => ({
     id: item.id,
     productId: item.product.id,
     productName: item.product.name,
@@ -166,7 +166,7 @@ async function getCartResponse(userId: string) {
   }));
 
   const subtotalEur = items.reduce(
-    (sum, item) => sum + item.priceEur * item.quantity,
+    (sum: number, item: typeof items[number]) => sum + item.priceEur * item.quantity,
     0
   );
 
@@ -174,6 +174,7 @@ async function getCartResponse(userId: string) {
     id: cart.id,
     restaurantId: cart.restaurantId,
     restaurantName: cart.restaurant?.name ?? null,
+    deliveryFeeEur: cart.restaurant?.deliveryFeeEur ? Number(cart.restaurant.deliveryFeeEur) : null,
     items,
     subtotalEur: Math.round(subtotalEur * 100) / 100,
   };

@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
     });
 
     return NextResponse.json({
-      data: categories.map((c) => ({
+      data: categories.map((c: typeof categories[number]) => ({
         id: c.id, name: c.name, sortOrder: c.sortOrder,
         restaurantId: c.restaurantId, restaurantName: c.restaurant.name,
       })),

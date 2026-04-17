@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db';
 import { requirePermission } from '@/lib/auth/rbac';
 import { logAudit } from '@/lib/services/audit.service';
 import type { UserRole } from '@/generated/prisma/client';
+import type { PrismaClient } from '@/generated/prisma/client';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,11 +38,11 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       data: {
-        products: products.map((p) => ({
+        products: products.map((p: typeof products[number]) => ({
           id: p.id, name: p.name, description: p.description,
           priceEur: Number(p.priceEur), imageUrl: p.imageUrl, isAvailable: p.isAvailable,
           categoryName: p.category.name, restaurantName: p.category.restaurant.name,
-          allergenIds: p.productAllergens.map((pa) => pa.allergenId),
+          allergenIds: p.productAllergens.map((pa: typeof p.productAllergens[number]) => pa.allergenId),
         })),
         pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
       },
@@ -64,7 +65,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ data: null, error: 'categoryId, name e imageUrl son obligatorios', success: false }, { status: 422 });
     }
 
-    const product = await prisma.$transaction(async (tx) => {
+    const product = await prisma.$transaction(async (tx: Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$use' | '$extends'>) => {
       const p = await tx.product.create({
         data: {
           categoryId: body.categoryId, name: body.name.trim(),

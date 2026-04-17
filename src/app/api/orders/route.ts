@@ -7,6 +7,7 @@ import { distanceKm, isInsideDeliveryZone } from '@/lib/domain/haversine';
 import { computeEta } from '@/lib/domain/eta-calculator';
 import { getAvailableSlots } from '@/lib/domain/slot-generator';
 import { logAudit } from '@/lib/services/audit.service';
+import type { PrismaClient } from '@/generated/prisma/client';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,7 +46,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       data: {
-        orders: orders.map((o) => ({
+        orders: orders.map((o: typeof orders[number]) => ({
           id: o.id,
           orderNumber: o.orderNumber,
           restaurantName: o.restaurant.name,
@@ -338,14 +339,14 @@ export async function POST(request: Request) {
 
     // Calculate subtotal and total
     const subtotalEur = cart.items.reduce(
-      (sum, item) => sum + Number(item.product.priceEur) * item.quantity,
+      (sum: number, item: typeof cart.items[number]) => sum + Number(item.product.priceEur) * item.quantity,
       0
     );
     const deliveryFeeEur = Number(restaurant.deliveryFeeEur);
     const totalEur = subtotalEur + deliveryFeeEur;
 
     // Count total items for ETA
-    const totalItems = cart.items.reduce((sum, item) => sum + item.quantity, 0);
+    const totalItems = cart.items.reduce((sum: number, item: typeof cart.items[number]) => sum + item.quantity, 0);
 
     // Count active orders for queue factor
     const activeOrderCount = await prisma.order.count({
@@ -369,7 +370,7 @@ export async function POST(request: Request) {
     });
 
     // 8. Create order + order_items + order_status_history in a transaction
-    const order = await prisma.$transaction(async (tx) => {
+    const order = await prisma.$transaction(async (tx: Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$use' | '$extends'>) => {
       const newOrder = await tx.order.create({
         data: {
           userId: session.user!.id!,
@@ -390,7 +391,7 @@ export async function POST(request: Request) {
 
       // Create order items (snapshot name and price)
       await tx.orderItem.createMany({
-        data: cart.items.map((item) => ({
+        data: cart.items.map((item: typeof cart.items[number]) => ({
           orderId: newOrder.id,
           productId: item.product.id,
           productName: item.product.name,

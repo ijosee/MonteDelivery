@@ -7,6 +7,7 @@ import { distanceKm } from '@/lib/domain/haversine';
 import { logAudit } from '@/lib/services/audit.service';
 import { requirePermission } from '@/lib/auth/rbac';
 import type { UserRole } from '@/generated/prisma/client';
+import type { PrismaClient } from '@/generated/prisma/client';
 
 export const dynamic = 'force-dynamic';
 
@@ -74,7 +75,7 @@ export async function POST(
     }
 
     // Recalculate ETA
-    const totalItems = order.items.reduce((s, i) => s + i.quantity, 0);
+    const totalItems = order.items.reduce((s: number, i: typeof order.items[number]) => s + i.quantity, 0);
     const dist = distanceKm(order.address.lat, order.address.lng, order.restaurant.lat, order.restaurant.lng);
     const activeCount = await prisma.order.count({
       where: {
@@ -90,7 +91,7 @@ export async function POST(
       scheduledFor: order.scheduledFor,
     });
 
-    const updated = await prisma.$transaction(async (tx) => {
+    const updated = await prisma.$transaction(async (tx: Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$use' | '$extends'>) => {
       const u = await tx.order.update({
         where: { id },
         data: {

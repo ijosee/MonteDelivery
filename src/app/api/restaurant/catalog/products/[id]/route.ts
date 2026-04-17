@@ -3,6 +3,7 @@ import { auth } from '@/lib/auth/auth';
 import { prisma } from '@/lib/db';
 import { requirePermission } from '@/lib/auth/rbac';
 import type { UserRole } from '@/generated/prisma/client';
+import type { PrismaClient } from '@/generated/prisma/client';
 
 export const dynamic = 'force-dynamic';
 
@@ -57,7 +58,7 @@ export async function PATCH(
       }
     }
 
-    const updated = await prisma.$transaction(async (tx) => {
+    const updated = await prisma.$transaction(async (tx: Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$use' | '$extends'>) => {
       const p = await tx.product.update({ where: { id }, data });
 
       // Update allergens if provided

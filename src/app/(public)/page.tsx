@@ -58,7 +58,7 @@ async function getRestaurants(searchParams: {
 
   const now = new Date();
 
-  let result: RestaurantDTO[] = restaurants.map((r) => ({
+  let result: RestaurantDTO[] = restaurants.map((r: typeof restaurants[number]) => ({
     id: r.id,
     name: r.name,
     slug: r.slug,

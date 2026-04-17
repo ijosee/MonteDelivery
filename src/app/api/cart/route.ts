@@ -20,7 +20,7 @@ export async function GET() {
     const cart = await prisma.cart.findUnique({
       where: { userId: session.user.id },
       include: {
-        restaurant: { select: { id: true, name: true } },
+        restaurant: { select: { id: true, name: true, deliveryFeeEur: true } },
         items: {
           include: {
             product: {
@@ -38,6 +38,7 @@ export async function GET() {
           id: cart?.id ?? null,
           restaurantId: null,
           restaurantName: null,
+          deliveryFeeEur: null,
           items: [],
           subtotalEur: 0,
         },
@@ -46,7 +47,7 @@ export async function GET() {
       });
     }
 
-    const items = cart.items.map((item) => ({
+    const items = cart.items.map((item: typeof cart.items[number]) => ({
       id: item.id,
       productId: item.product.id,
       productName: item.product.name,
@@ -56,7 +57,7 @@ export async function GET() {
     }));
 
     const subtotalEur = items.reduce(
-      (sum, item) => sum + item.priceEur * item.quantity,
+      (sum: number, item: typeof items[number]) => sum + item.priceEur * item.quantity,
       0
     );
 
@@ -65,6 +66,7 @@ export async function GET() {
         id: cart.id,
         restaurantId: cart.restaurantId,
         restaurantName: cart.restaurant?.name ?? null,
+        deliveryFeeEur: cart.restaurant?.deliveryFeeEur ? Number(cart.restaurant.deliveryFeeEur) : null,
         items,
         subtotalEur: Math.round(subtotalEur * 100) / 100,
       },
@@ -106,7 +108,7 @@ export async function DELETE() {
     }
 
     return NextResponse.json({
-      data: { id: cart?.id ?? null, restaurantId: null, restaurantName: null, items: [], subtotalEur: 0 },
+      data: { id: cart?.id ?? null, restaurantId: null, restaurantName: null, deliveryFeeEur: null, items: [], subtotalEur: 0 },
       error: null,
       success: true,
     });

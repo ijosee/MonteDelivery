@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db';
 import { requirePermission } from '@/lib/auth/rbac';
 import { logAudit } from '@/lib/services/audit.service';
 import type { UserRole } from '@/generated/prisma/client';
+import type { PrismaClient } from '@/generated/prisma/client';
 
 export const dynamic = 'force-dynamic';
 
@@ -73,7 +74,7 @@ export async function POST(request: Request) {
     }
 
     // Create association and update user role
-    await prisma.$transaction(async (tx) => {
+    await prisma.$transaction(async (tx: Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$use' | '$extends'>) => {
       await tx.restaurantUser.create({
         data: {
           userId: user.id,

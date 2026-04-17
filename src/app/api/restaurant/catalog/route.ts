@@ -41,18 +41,18 @@ export async function GET() {
       },
     });
 
-    const data = categories.map((cat) => ({
+    const data = categories.map((cat: typeof categories[number]) => ({
       id: cat.id,
       name: cat.name,
       sortOrder: cat.sortOrder,
-      products: cat.products.map((p) => ({
+      products: cat.products.map((p: typeof cat.products[number]) => ({
         id: p.id,
         name: p.name,
         description: p.description,
         priceEur: Number(p.priceEur),
         imageUrl: p.imageUrl,
         isAvailable: p.isAvailable,
-        allergenIds: p.productAllergens.map((pa) => pa.allergenId),
+        allergenIds: p.productAllergens.map((pa: typeof p.productAllergens[number]) => pa.allergenId),
       })),
     }));
 
