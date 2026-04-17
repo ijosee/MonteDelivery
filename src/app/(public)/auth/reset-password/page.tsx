@@ -1,18 +1,31 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 
-export default function ResetPasswordPage() {
+function ResetPasswordContent() {
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
 
-  // If token is present, show the reset form; otherwise show the request form
   if (token) {
     return <ResetForm token={token} />;
   }
   return <RequestForm />;
+}
+
+export default function ResetPasswordPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center">
+          <p className="text-gray-500">Cargando...</p>
+        </div>
+      }
+    >
+      <ResetPasswordContent />
+    </Suspense>
+  );
 }
 
 function RequestForm() {

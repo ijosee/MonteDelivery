@@ -1,0 +1,89 @@
+# Implementation Plan
+
+- [x] 1. Write bug condition exploration test
+  - **Property 1: Bug Condition** — Añadir Button Missing from ProductCards in CategoryTabs
+  - **CRITICAL**: This test MUST FAIL on unfixed code — failure confirms the bug exists
+  - **DO NOT attempt to fix the test or the code when it fails**
+  - **NOTE**: This test encodes the expected behavior — it will validate the fix when it passes after implementation
+  - **GOAL**: Surface counterexamples that demonstrate the bug exists
+  - **Scoped PBT Approach**: Use `fast-check` to generate arbitrary product lists, render `CategoryTabs` with those products, and assert every rendered `ProductCard` receives a defined `onAdd` prop and displays an "Añadir" button
+  - Create test file `src/app/(public)/restaurante/[slug]/CategoryTabs.test.tsx`
+  - Use vitest + fast-check (both already in devDependencies)
+  - Since vitest environment is `node`, mock or use a lightweight DOM approach; alternatively set `environment: 'jsdom'` in a `// @vitest-environment jsdom` directive at the top of the test file
+  - Generate random categories with products using `fc.array(fc.record({ id: fc.uuid(), name: fc.string(), ... }))`
+  - For each generated category/product set, render `<CategoryTabs categories={categories} />`
+  - Assert: every product card contains an "Añadir" button (query by role `button` with name `Añadir`)
+  - Bug Condition from design: `isBugCondition(input) => renderedCard.props.onAdd IS undefined`
+  - Expected Behavior from design: every `ProductCard` SHALL receive a defined `onAdd` callback
+  - Run test on UNFIXED code
+  - **EXPECTED OUTCOME**: Test FAILS (this is correct — it proves the bug exists because `onAdd` is not passed)
+  - Document counterexamples found (e.g., "ProductCard for product X has no Añadir button")
+  - Mark task complete when test is written, run, and failure is documented
+  - _Requirements: 1.1, 2.1_
+
+- [x] 2. Write preservation property tests (BEFORE implementing fix)
+  - **Property 2: Preservation** — Product Display and Tab Navigation Unchanged
+  - **IMPORTANT**: Follow observation-first methodology
+  - **IMPORTANT**: Write and run these tests BEFORE implementing the fix
+  - Create preservation tests in the same test file `src/app/(public)/restaurante/[slug]/CategoryTabs.test.tsx`
+  - Use vitest + fast-check for property-based testing
+  - **Observation phase** (on UNFIXED code):
+    - Observe: rendering `CategoryTabs` with products displays product name, price (`X.XX €`), description, and allergen badges
+    - Observe: switching category tabs shows only products for the selected category
+    - Observe: a category with 0 products shows "No hay productos disponibles en esta categoría"
+  - **Property-based tests**:
+    - For all generated category/product configurations, verify each product's name appears in the rendered output
+    - For all generated category/product configurations, verify each product's price (formatted as `X.XX €`) appears in the rendered output
+    - For all generated category/product configurations with allergens, verify allergen badges render
+    - For all generated categories, verify switching tabs shows the correct product count
+    - For a category with an empty products array, verify the empty-state message renders
+  - Preservation from design: product card display (name, description, price, image, allergens), tab switching, and empty-category messaging must remain unchanged
+  - Run tests on UNFIXED code
+  - **EXPECTED OUTCOME**: Tests PASS (this confirms baseline behavior to preserve)
+  - Mark task complete when tests are written, run, and passing on unfixed code
+  - _Requirements: 3.1, 3.2, 3.5_
+
+- [x] 3. Fix: Wire onAdd prop and add conflict dialog to CategoryTabs
+
+  - [x] 3.1 Implement the fix in `src/app/(public)/restaurante/[slug]/CategoryTabs.tsx`
+    - Import `useCart` from `@/hooks/use-cart`
+    - Import `Dialog` from `@/components/ui`
+    - Add state: `conflictOpen` (boolean, default false), `pendingProductId` (string | null, default null), `addedProductId` (string | null, for success feedback)
+    - Call `useCart()` and destructure `addItem` and `clearAndAdd`
+    - Create `handleAdd` async handler:
+      - Calls `addItem(productId)`
+      - On `{success: true}`: set `addedProductId` to `productId`, clear after ~1.5s with `setTimeout`
+      - On `{conflict: true}`: set `pendingProductId` to `productId` and `conflictOpen` to `true`
+      - On error: optionally show error (toast or inline)
+    - Create `handleConfirmConflict` async handler:
+      - Calls `clearAndAdd(pendingProductId!)` 
+      - On success: close dialog, clear `pendingProductId`, set `addedProductId`
+      - On failure: close dialog, clear `pendingProductId`
+    - Pass `onAdd={handleAdd}` to each `<ProductCard>` in the products grid
+    - Render `<Dialog open={conflictOpen} onClose={() => { setConflictOpen(false); setPendingProductId(null); }} title="¿Cambiar de restaurante?">` with explanation text and two buttons: "Cancelar" and "Cambiar restaurante"
+    - _Bug_Condition: isBugCondition(input) => renderedCard.props.onAdd IS undefined_
+    - _Expected_Behavior: every ProductCard receives onAdd handler that calls addItem(product.id)_
+    - _Preservation: product display, tab switching, empty-category message unchanged_
+    - _Requirements: 1.1, 1.2, 1.3, 2.1, 2.2, 2.3, 3.1, 3.2, 3.3, 3.4, 3.5_
+
+  - [x] 3.2 Verify bug condition exploration test now passes
+    - **Property 1: Expected Behavior** — Añadir Button Appears and Triggers addItem
+    - **IMPORTANT**: Re-run the SAME test from task 1 — do NOT write a new test
+    - The test from task 1 encodes the expected behavior (every ProductCard has an Añadir button)
+    - When this test passes, it confirms the expected behavior is satisfied
+    - Run: `pnpm test src/app/(public)/restaurante/[slug]/CategoryTabs.test.tsx`
+    - **EXPECTED OUTCOME**: Test PASSES (confirms bug is fixed — onAdd is now wired)
+    - _Requirements: 2.1, 2.2_
+
+  - [x] 3.3 Verify preservation tests still pass
+    - **Property 2: Preservation** — Product Display and Tab Navigation Unchanged
+    - **IMPORTANT**: Re-run the SAME tests from task 2 — do NOT write new tests
+    - Run: `pnpm test src/app/(public)/restaurante/[slug]/CategoryTabs.test.tsx`
+    - **EXPECTED OUTCOME**: Tests PASS (confirms no regressions in product display, tab switching, or empty-category message)
+    - Confirm all tests still pass after fix (no regressions)
+
+- [x] 4. Checkpoint — Ensure all tests pass
+  - Run full test suite: `pnpm test`
+  - Ensure all property-based tests (bug condition + preservation) pass
+  - Ensure no TypeScript or lint errors: `pnpm lint`
+  - Ask the user if questions arise

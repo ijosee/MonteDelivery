@@ -3,7 +3,7 @@
 import Header from './Header';
 import BottomNav from './BottomNav';
 import FABCart from '@/components/cart/FABCart';
-import { useCart } from '@/hooks/use-cart';
+import { useCart } from '@/contexts/cart-context';
 import type { ReactNode } from 'react';
 
 interface Props {

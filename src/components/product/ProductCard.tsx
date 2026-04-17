@@ -18,13 +18,15 @@ interface ProductCardProps {
     allergens: ProductAllergen[];
   };
   onAdd?: (productId: string) => void;
+  isAdded?: boolean;
+  cartQuantity?: number;
 }
 
 function isPlaceholder(url: string): boolean {
   return url.startsWith('/placeholder');
 }
 
-export default function ProductCard({ product, onAdd }: ProductCardProps) {
+export default function ProductCard({ product, onAdd, isAdded, cartQuantity }: ProductCardProps) {
   const showImage = !isPlaceholder(product.imageUrl);
 
   return (
@@ -79,13 +81,24 @@ export default function ProductCard({ product, onAdd }: ProductCardProps) {
             {product.priceEur.toFixed(2)} €
           </span>
           {onAdd && (
-            <button
-              type="button"
-              onClick={() => onAdd(product.id)}
-              className="rounded-full bg-green-600 px-4 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 sm:text-sm"
-            >
-              Añadir
-            </button>
+            <div className="flex items-center gap-1.5">
+              {(cartQuantity ?? 0) >= 1 && (
+                <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-green-100 px-1 text-xs font-bold text-green-700">
+                  {cartQuantity}
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => onAdd(product.id)}
+                className={`rounded-full px-4 py-1.5 text-xs font-medium text-white shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 sm:text-sm ${
+                  isAdded
+                    ? 'bg-green-700'
+                    : 'bg-green-600 hover:bg-green-700'
+                }`}
+              >
+                {isAdded ? '✓ Añadido' : 'Añadir'}
+              </button>
+            </div>
           )}
         </div>
       </div>

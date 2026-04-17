@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
 import SessionProvider from '@/components/providers/SessionProvider';
+import { CartProvider } from '@/contexts/cart-context';
 import CookieBanner from '@/components/legal/CookieBanner';
 import Header from '@/components/layout/Header';
 
@@ -41,9 +42,11 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <SessionProvider>
-          <Header />
-          {children}
-          <CookieBanner />
+          <CartProvider>
+            <Header />
+            {children}
+            <CookieBanner />
+          </CartProvider>
         </SessionProvider>
       </body>
     </html>

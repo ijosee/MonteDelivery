@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export const createOrderSchema = z
   .object({
-    addressId: z.cuid(),
+    addressId: z.string().min(1, 'La dirección es obligatoria.'),
     phone: z.string().regex(/^\+34\d{9}$/, {
       message: 'El teléfono debe tener el formato +34XXXXXXXXX.',
     }),

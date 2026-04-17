@@ -26,7 +26,7 @@ export default function PerfilPage() {
     <div className="mx-auto max-w-2xl px-4 py-8">
       {/* User info */}
       <div className="flex items-center gap-4">
-        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-blue-100 text-2xl">
+        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green-100 text-2xl">
           {session?.user?.name?.[0]?.toUpperCase() ?? '👤'}
         </div>
         <div>
@@ -45,7 +45,7 @@ export default function PerfilPage() {
           <Link
             key={link.href}
             href={link.href}
-            className="flex min-h-[44px] items-center gap-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            className="flex min-h-[44px] items-center gap-3 rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
           >
             <span aria-hidden="true">{link.icon}</span>
             <span>{link.label}</span>

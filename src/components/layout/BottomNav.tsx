@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 
 const NAV_ITEMS = [
   { href: '/', label: 'Inicio', icon: '🏠' },
-  { href: '/como-funciona', label: 'Buscar', icon: '🔍' },
+  { href: '/', label: 'Explorar', icon: '🧭' },
   { href: '/pedidos', label: 'Pedidos', icon: '📋' },
   { href: '/perfil', label: 'Perfil', icon: '👤' },
 ] as const;
@@ -33,11 +33,11 @@ export default function BottomNav() {
 
           return (
             <Link
-              key={item.href}
+              key={item.label}
               href={item.href}
-              className={`flex min-h-[56px] min-w-[44px] flex-1 flex-col items-center justify-center gap-0.5 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500 ${
+              className={`flex min-h-[56px] min-w-[44px] flex-1 flex-col items-center justify-center gap-0.5 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-green-500 ${
                 isActive
-                  ? 'text-blue-600'
+                  ? 'text-green-600'
                   : 'text-gray-500 hover:text-gray-700'
               }`}
               aria-current={isActive ? 'page' : undefined}

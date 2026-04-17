@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useAddressSearch } from '@/hooks/use-address-search';
+import { useCart } from '@/contexts/cart-context';
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -36,10 +38,30 @@ interface SlotData {
   slots: string[];
 }
 
+interface NearbyRestaurant {
+  id: string;
+  name: string;
+  slug: string;
+  imageUrl: string | null;
+  cuisineType: string | null;
+  deliveryFeeEur: number;
+  distanceKm: number;
+  canDeliver: boolean;
+  isOpen: boolean;
+}
+
+interface OrderError {
+  error: string;
+  code?: string;
+  title?: string;
+  action?: string;
+}
+
 // ─── Component ───────────────────────────────────────────────
 
 export default function CheckoutPage() {
   const router = useRouter();
+  const { fetchCart: refreshGlobalCart } = useCart();
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,6 +79,15 @@ export default function CheckoutPage() {
   const [newAddressLabel, setNewAddressLabel] = useState('');
   const addressSearch = useAddressSearch();
 
+  // Phone verification
+  const [phoneVerified, setPhoneVerified] = useState(false);
+  const [verificationSent, setVerificationSent] = useState(false);
+  const [verificationCode, setVerificationCode] = useState('');
+  const [verificationError, setVerificationError] = useState<string | null>(null);
+  const [sendingCode, setSendingCode] = useState(false);
+  const [verifyingCode, setVerifyingCode] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+
   // Step 2 — Delivery type
   const [fulfillmentType, setFulfillmentType] = useState<'ASAP' | 'SCHEDULED'>('ASAP');
   const [selectedDate, setSelectedDate] = useState('');
@@ -67,6 +98,11 @@ export default function CheckoutPage() {
   // Step 3 — Confirm
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [deliveryFee, setDeliveryFee] = useState(0);
+
+  // Order error recovery
+  const [orderError, setOrderError] = useState<OrderError | null>(null);
+  const [nearbyRestaurants, setNearbyRestaurants] = useState<NearbyRestaurant[]>([]);
+  const [loadingNearby, setLoadingNearby] = useState(false);
 
   // ─── Load cart ─────────────────────────────────────────────
 
@@ -110,8 +146,6 @@ export default function CheckoutPage() {
 
   useEffect(() => {
     if (!cart?.restaurantId) return;
-    // We need the restaurant slug or ID to get delivery fee
-    // For now, fetch from the restaurants API by searching
     async function loadRestaurantInfo() {
       try {
         const res = await fetch(`/api/restaurants`);
@@ -160,7 +194,83 @@ export default function CheckoutPage() {
     }
   }, [selectedDate, loadSlots]);
 
-  // ─── Handlers ──────────────────────────────────────────────
+  // ─── Cooldown timer for phone verification ────────────────
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = setInterval(() => {
+      setCooldown((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [cooldown]);
+
+  // Reset verification when phone changes
+  useEffect(() => {
+    setPhoneVerified(false);
+    setVerificationSent(false);
+    setVerificationCode('');
+    setVerificationError(null);
+  }, [phone]);
+
+  // ─── Phone verification handlers ──────────────────────────
+
+  const handleSendCode = async () => {
+    if (sendingCode || cooldown > 0) return;
+    setSendingCode(true);
+    setVerificationError(null);
+
+    try {
+      const res = await fetch('/api/phone-verification/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone }),
+      });
+      const json = await res.json();
+
+      if (json.success) {
+        setVerificationSent(true);
+        setCooldown(60);
+        // In dev mode, auto-fill the code for convenience
+        if (json.data?.devCode) {
+          setVerificationCode(json.data.devCode);
+        }
+      } else {
+        setVerificationError(json.error ?? 'Error al enviar el código');
+      }
+    } catch {
+      setVerificationError('Error al enviar el código');
+    } finally {
+      setSendingCode(false);
+    }
+  };
+
+  const handleVerifyCode = async () => {
+    if (verifyingCode) return;
+    setVerifyingCode(true);
+    setVerificationError(null);
+
+    try {
+      const res = await fetch('/api/phone-verification/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, code: verificationCode }),
+      });
+      const json = await res.json();
+
+      if (json.success) {
+        setPhoneVerified(true);
+        setVerificationError(null);
+      } else {
+        setVerificationError(json.error ?? 'Código incorrecto');
+      }
+    } catch {
+      setVerificationError('Error al verificar el código');
+    } finally {
+      setVerifyingCode(false);
+    }
+  };
+
+  // ─── Address handlers ─────────────────────────────────────
 
   const handleSaveNewAddress = async () => {
     if (!addressSearch.selectedAddress) {
@@ -204,10 +314,36 @@ export default function CheckoutPage() {
     }
   };
 
+  // ─── Load nearby restaurants for error recovery ───────────
+
+  const loadNearbyRestaurants = useCallback(async () => {
+    if (!selectedAddressId) return;
+
+    setLoadingNearby(true);
+    try {
+      const params = new URLSearchParams({
+        addressId: selectedAddressId,
+        ...(cart?.restaurantId ? { excludeId: cart.restaurantId } : {}),
+      });
+      const res = await fetch(`/api/restaurants/nearby?${params}`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        setNearbyRestaurants(json.data);
+      }
+    } catch {
+      // Silently fail
+    } finally {
+      setLoadingNearby(false);
+    }
+  }, [selectedAddressId, cart?.restaurantId]);
+
+  // ─── Order confirmation handler ───────────────────────────
+
   const handleConfirmOrder = async () => {
     if (!selectedAddressId || !termsAccepted) return;
 
     setError(null);
+    setOrderError(null);
     setIsSubmitting(true);
 
     try {
@@ -231,10 +367,22 @@ export default function CheckoutPage() {
       const json = await res.json();
 
       if (json.success && json.data) {
-        // Navigate to confirmation page
+        // Refresh the global cart state so badge/header updates
+        await refreshGlobalCart();
         router.push(`/checkout/confirmacion?orderId=${json.data.id}`);
       } else {
-        setError(json.error ?? 'Error al crear el pedido');
+        // Set structured error for recovery UI
+        setOrderError({
+          error: json.error ?? 'Error al crear el pedido',
+          code: json.code,
+          title: json.title,
+          action: json.action,
+        });
+
+        // If out of delivery zone, load nearby alternatives
+        if (json.code === 'OUTSIDE_DELIVERY_ZONE') {
+          loadNearbyRestaurants();
+        }
       }
     } catch {
       setError('Error al crear el pedido');
@@ -271,7 +419,8 @@ export default function CheckoutPage() {
   const total = subtotal + deliveryFee;
 
   const phoneRegex = /^\+34\d{9}$/;
-  const canProceedStep1 = selectedAddressId && phoneRegex.exec(phone);
+  const isPhoneValid = phoneRegex.test(phone);
+  const canProceedStep1 = selectedAddressId && isPhoneValid && phoneVerified;
   const canProceedStep2 =
     fulfillmentType === 'ASAP' ||
     (fulfillmentType === 'SCHEDULED' && selectedDate && selectedSlot);
@@ -323,14 +472,14 @@ export default function CheckoutPage() {
           })}
         </div>
 
-        {/* Error display */}
+        {/* Generic error display */}
         {error && (
           <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
             {error}
           </div>
         )}
 
-        {/* ─── Step 1: Address ─────────────────────────────── */}
+        {/* ─── Step 1: Address + Phone ─────────────────────── */}
         {step === 1 && (
           <div>
             <h2 className="text-lg font-semibold text-gray-900 mb-4">
@@ -485,23 +634,96 @@ export default function CheckoutPage() {
               </div>
             )}
 
-            {/* Phone */}
+            {/* Phone + Verification */}
             <div className="mb-6">
               <label htmlFor="phone" className="block text-sm font-medium text-gray-700 mb-1">
                 Teléfono de contacto *
               </label>
-              <input
-                id="phone"
-                type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="+34612345678"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm"
-              />
-              {phone && !phoneRegex.exec(phone) && phone !== '+34' && (
+              <div className="flex gap-2">
+                <input
+                  id="phone"
+                  type="tel"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="+34612345678"
+                  disabled={phoneVerified}
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm disabled:bg-gray-50 disabled:text-gray-500"
+                />
+                {!phoneVerified && isPhoneValid && (
+                  <button
+                    type="button"
+                    onClick={handleSendCode}
+                    disabled={sendingCode || cooldown > 0}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                  >
+                    {sendingCode
+                      ? 'Enviando...'
+                      : cooldown > 0
+                        ? `Reenviar (${cooldown}s)`
+                        : verificationSent
+                          ? 'Reenviar código'
+                          : 'Verificar'}
+                  </button>
+                )}
+              </div>
+
+              {phone && !isPhoneValid && phone !== '+34' && (
                 <p className="text-xs text-red-500 mt-1">
                   El teléfono debe tener el formato +34XXXXXXXXX
                 </p>
+              )}
+
+              {/* Verified badge */}
+              {phoneVerified && (
+                <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
+                  <span>✓</span> Teléfono verificado
+                </p>
+              )}
+
+              {/* OTP input */}
+              {verificationSent && !phoneVerified && (
+                <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <p className="text-sm text-blue-800 mb-2">
+                    Hemos enviado un código de 6 dígitos a {phone}
+                  </p>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={6}
+                      value={verificationCode}
+                      onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ''))}
+                      placeholder="000000"
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-center text-lg tracking-widest font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      autoComplete="one-time-code"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleVerifyCode}
+                      disabled={verificationCode.length !== 6 || verifyingCode}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {verifyingCode ? 'Verificando...' : 'Confirmar'}
+                    </button>
+                  </div>
+                  {verificationError && (
+                    <p className="text-xs text-red-600 mt-2">{verificationError}</p>
+                  )}
+                  <p className="text-xs text-gray-500 mt-2">
+                    ¿No lo recibes?{' '}
+                    {cooldown > 0 ? (
+                      <span>Reenviar en {cooldown}s</span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleSendCode}
+                        className="text-blue-600 underline"
+                      >
+                        Reenviar código
+                      </button>
+                    )}
+                  </p>
+                </div>
               )}
             </div>
 
@@ -643,98 +865,248 @@ export default function CheckoutPage() {
               ✅ Confirmar pedido
             </h2>
 
-            {/* Order summary */}
-            <div className="bg-white rounded-lg border border-gray-200 p-4 mb-4">
-              <h3 className="font-medium text-gray-900 mb-3">Resumen del pedido</h3>
-              <div className="space-y-2">
-                {cart.items.map((item) => (
-                  <div key={item.id} className="flex justify-between text-sm">
-                    <span className="text-gray-700">
-                      {item.quantity}x {item.productName}
-                    </span>
-                    <span className="text-gray-900 font-medium">
-                      {(item.priceEur * item.quantity).toFixed(2)} €
-                    </span>
+            {/* ─── Order Error Recovery Panel ─────────────── */}
+            {orderError && (
+              <div className="mb-6 rounded-xl border-2 border-amber-200 bg-amber-50 overflow-hidden">
+                {/* Error header */}
+                <div className="p-4 border-b border-amber-200">
+                  <p className="font-semibold text-amber-900 text-base">
+                    {orderError.title ?? '⚠️ No se pudo completar el pedido'}
+                  </p>
+                  <p className="text-sm text-amber-800 mt-1">{orderError.error}</p>
+                </div>
+
+                {/* Recovery actions */}
+                <div className="p-4 space-y-3">
+                  <p className="text-sm font-medium text-gray-700">
+                    ¿Qué quieres hacer?
+                  </p>
+
+                  {/* Action: Change address (for delivery zone errors) */}
+                  {(orderError.code === 'OUTSIDE_DELIVERY_ZONE' || orderError.code === 'OUTSIDE_SERVICE_AREA') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOrderError(null);
+                        setStep(1);
+                      }}
+                      className="w-full text-left p-3 bg-white rounded-lg border border-gray-200 hover:border-green-500 hover:bg-green-50 transition-colors"
+                    >
+                      <p className="font-medium text-gray-900 text-sm">📍 Cambiar dirección de entrega</p>
+                      <p className="text-xs text-gray-500">Usa otra dirección más cercana al restaurante</p>
+                    </button>
+                  )}
+
+                  {/* Action: Schedule order (for restaurant closed) */}
+                  {orderError.code === 'RESTAURANT_CLOSED' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOrderError(null);
+                        setFulfillmentType('SCHEDULED');
+                        setStep(2);
+                      }}
+                      className="w-full text-left p-3 bg-white rounded-lg border border-gray-200 hover:border-green-500 hover:bg-green-50 transition-colors"
+                    >
+                      <p className="font-medium text-gray-900 text-sm">📅 Programar para más tarde</p>
+                      <p className="text-xs text-gray-500">Elige un horario en el que el restaurante esté abierto</p>
+                    </button>
+                  )}
+
+                  {/* Action: Change slot (for slot unavailable) */}
+                  {orderError.code === 'SLOT_UNAVAILABLE' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOrderError(null);
+                        setSelectedSlot('');
+                        setStep(2);
+                      }}
+                      className="w-full text-left p-3 bg-white rounded-lg border border-gray-200 hover:border-green-500 hover:bg-green-50 transition-colors"
+                    >
+                      <p className="font-medium text-gray-900 text-sm">⏱️ Elegir otra hora</p>
+                      <p className="text-xs text-gray-500">Selecciona un horario disponible</p>
+                    </button>
+                  )}
+
+                  {/* Action: Review cart (for product unavailable) */}
+                  {orderError.code === 'PRODUCT_UNAVAILABLE' && (
+                    <Link
+                      href="/carrito"
+                      className="block w-full text-left p-3 bg-white rounded-lg border border-gray-200 hover:border-green-500 hover:bg-green-50 transition-colors"
+                    >
+                      <p className="font-medium text-gray-900 text-sm">🛒 Revisar mi carrito</p>
+                      <p className="text-xs text-gray-500">Elimina los productos no disponibles y vuelve a intentarlo</p>
+                    </Link>
+                  )}
+
+                  {/* Nearby restaurants (for delivery zone errors) */}
+                  {orderError.code === 'OUTSIDE_DELIVERY_ZONE' && (
+                    <div className="mt-2">
+                      <p className="text-sm font-medium text-gray-700 mb-2">
+                        🍽️ Restaurantes que sí llegan a tu dirección:
+                      </p>
+                      {loadingNearby && (
+                        <p className="text-sm text-gray-400 py-2">Buscando alternativas...</p>
+                      )}
+                      {!loadingNearby && nearbyRestaurants.length === 0 && (
+                        <p className="text-sm text-gray-500 py-2">
+                          No encontramos otros restaurantes que cubran tu zona. Prueba con otra dirección.
+                        </p>
+                      )}
+                      {!loadingNearby && nearbyRestaurants.length > 0 && (
+                        <div className="space-y-2">
+                          {nearbyRestaurants.map((r) => (
+                            <Link
+                              key={r.id}
+                              href={`/restaurante/${r.slug}`}
+                              className="flex items-center gap-3 p-3 bg-white rounded-lg border border-gray-200 hover:border-green-500 hover:bg-green-50 transition-colors"
+                            >
+                              {r.imageUrl ? (
+                                <img
+                                  src={r.imageUrl}
+                                  alt={r.name}
+                                  className="w-12 h-12 rounded-lg object-cover"
+                                />
+                              ) : (
+                                <div className="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center text-xl">
+                                  🍽️
+                                </div>
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium text-gray-900 text-sm truncate">{r.name}</p>
+                                <p className="text-xs text-gray-500">
+                                  {r.cuisineType ?? 'Variado'} · {r.distanceKm} km · Envío {r.deliveryFeeEur.toFixed(2)} €
+                                </p>
+                                <p className={`text-xs ${r.isOpen ? 'text-green-600' : 'text-gray-400'}`}>
+                                  {r.isOpen ? '● Abierto ahora' : '○ Cerrado'}
+                                </p>
+                              </div>
+                              <span className="text-gray-400 text-sm">→</span>
+                            </Link>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Always show: go to home / browse restaurants */}
+                  <div className="flex gap-2 pt-2 border-t border-amber-200">
+                    <Link
+                      href="/"
+                      className="flex-1 py-2.5 text-center bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                    >
+                      🏠 Ir al inicio
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => setOrderError(null)}
+                      className="flex-1 py-2.5 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors"
+                    >
+                      Reintentar pedido
+                    </button>
                   </div>
-                ))}
-              </div>
-              <hr className="my-3" />
-              <div className="space-y-1">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-600">Subtotal</span>
-                  <span className="text-gray-900">{subtotal.toFixed(2)} €</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-600">Envío</span>
-                  <span className="text-gray-900">{deliveryFee.toFixed(2)} €</span>
-                </div>
-                <div className="flex justify-between text-base font-bold mt-2">
-                  <span className="text-gray-900">Total</span>
-                  <span className="text-green-700">{total.toFixed(2)} €</span>
                 </div>
               </div>
-            </div>
+            )}
 
-            {/* Delivery info */}
-            <div className="bg-white rounded-lg border border-gray-200 p-4 mb-4">
-              <p className="text-sm text-gray-600">
-                <span className="font-medium">Entrega:</span>{' '}
-                {fulfillmentType === 'ASAP'
-                  ? 'Lo antes posible'
-                  : `Programada — ${selectedDate} a las ${selectedSlot}`}
-              </p>
-              <p className="text-sm text-gray-600">
-                <span className="font-medium">Pago:</span> Contra entrega (efectivo)
-              </p>
-            </div>
+            {/* Order summary (hidden when error panel is showing) */}
+            {!orderError && (
+              <>
+                {/* Order summary */}
+                <div className="bg-white rounded-lg border border-gray-200 p-4 mb-4">
+                  <h3 className="font-medium text-gray-900 mb-3">Resumen del pedido</h3>
+                  <div className="space-y-2">
+                    {cart.items.map((item) => (
+                      <div key={item.id} className="flex justify-between text-sm">
+                        <span className="text-gray-700">
+                          {item.quantity}x {item.productName}
+                        </span>
+                        <span className="text-gray-900 font-medium">
+                          {(item.priceEur * item.quantity).toFixed(2)} €
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <hr className="my-3" />
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">Subtotal</span>
+                      <span className="text-gray-900">{subtotal.toFixed(2)} €</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">Envío</span>
+                      <span className="text-gray-900">{deliveryFee.toFixed(2)} €</span>
+                    </div>
+                    <div className="flex justify-between text-base font-bold mt-2">
+                      <span className="text-gray-900">Total</span>
+                      <span className="text-green-700">{total.toFixed(2)} €</span>
+                    </div>
+                  </div>
+                </div>
 
-            {/* Info Precontractual */}
-            <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 mb-4 text-xs text-gray-500 space-y-1">
-              <p className="font-semibold text-gray-700">Información precontractual</p>
-              <p>Restaurante: {cart.restaurantName}</p>
-              <p>
-                Precio total desglosado: Subtotal {subtotal.toFixed(2)} € + Envío{' '}
-                {deliveryFee.toFixed(2)} € = Total {total.toFixed(2)} €
-              </p>
-              <p>Forma de pago: Contra entrega (efectivo)</p>
-              <p>
-                Condiciones de cancelación: Los pedidos ASAP solo pueden cancelarse en
-                estado &quot;Pendiente&quot;. Los pedidos programados pueden cancelarse hasta 60
-                minutos antes de la hora de entrega.
-              </p>
-            </div>
+                {/* Delivery info */}
+                <div className="bg-white rounded-lg border border-gray-200 p-4 mb-4">
+                  <p className="text-sm text-gray-600">
+                    <span className="font-medium">Entrega:</span>{' '}
+                    {fulfillmentType === 'ASAP'
+                      ? 'Lo antes posible'
+                      : `Programada — ${selectedDate} a las ${selectedSlot}`}
+                  </p>
+                  <p className="text-sm text-gray-600">
+                    <span className="font-medium">Pago:</span> Contra entrega (efectivo)
+                  </p>
+                </div>
 
-            {/* Terms checkbox */}
-            <label className="flex items-start gap-3 mb-6 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={termsAccepted}
-                onChange={(e) => setTermsAccepted(e.target.checked)}
-                className="mt-0.5 w-5 h-5 rounded border-gray-300 text-green-600 focus:ring-green-500"
-              />
-              <span className="text-sm text-gray-700">
-                Acepto las condiciones de uso y la política de privacidad. He leído la
-                información precontractual.
-              </span>
-            </label>
+                {/* Info Precontractual */}
+                <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 mb-4 text-xs text-gray-500 space-y-1">
+                  <p className="font-semibold text-gray-700">Información precontractual</p>
+                  <p>Restaurante: {cart.restaurantName}</p>
+                  <p>
+                    Precio total desglosado: Subtotal {subtotal.toFixed(2)} € + Envío{' '}
+                    {deliveryFee.toFixed(2)} € = Total {total.toFixed(2)} €
+                  </p>
+                  <p>Forma de pago: Contra entrega (efectivo)</p>
+                  <p>
+                    Condiciones de cancelación: Los pedidos ASAP solo pueden cancelarse en
+                    estado &quot;Pendiente&quot;. Los pedidos programados pueden cancelarse hasta 60
+                    minutos antes de la hora de entrega.
+                  </p>
+                </div>
 
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setStep(2)}
-                className="px-6 py-3 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50"
-              >
-                Atrás
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmOrder}
-                disabled={!canConfirm}
-                className="flex-1 py-3 bg-green-600 text-white rounded-lg font-bold text-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isSubmitting ? 'Procesando...' : `Confirmar pedido — ${total.toFixed(2)} €`}
-              </button>
-            </div>
+                {/* Terms checkbox */}
+                <label className="flex items-start gap-3 mb-6 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={termsAccepted}
+                    onChange={(e) => setTermsAccepted(e.target.checked)}
+                    className="mt-0.5 w-5 h-5 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                  />
+                  <span className="text-sm text-gray-700">
+                    Acepto las condiciones de uso y la política de privacidad. He leído la
+                    información precontractual.
+                  </span>
+                </label>
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setStep(2)}
+                    className="px-6 py-3 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50"
+                  >
+                    Atrás
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmOrder}
+                    disabled={!canConfirm}
+                    className="flex-1 py-3 bg-green-600 text-white rounded-lg font-bold text-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isSubmitting ? 'Procesando...' : `Confirmar pedido — ${total.toFixed(2)} €`}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>

@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { auth } from '@/lib/auth/auth';
 import SignOutButton from './SignOutButton';
+import CartBadge from '@/components/cart/CartBadge';
 
 const ROLE_LABELS: Record<string, string> = {
   ADMIN: 'Admin',
@@ -44,7 +45,7 @@ export default async function Header() {
                 Mis pedidos
               </Link>
               <Link href="/carrito" className="text-sm font-medium text-gray-700 hover:text-green-600">
-                🛒 Carrito
+                🛒 Carrito<CartBadge />
               </Link>
             </>
           )}

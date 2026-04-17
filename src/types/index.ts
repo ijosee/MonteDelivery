@@ -48,6 +48,7 @@ export interface CartDTO {
   id: string;
   restaurantId: string | null;
   restaurantName: string | null;
+  deliveryFeeEur: number | null;
   items: CartItemDTO[];
   subtotalEur: number;
 }

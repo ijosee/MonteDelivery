@@ -1,6 +1,7 @@
 // prisma/seed.ts — Pueblo Delivery Marketplace seed data
 // Requisitos: 26.1, 26.2, 26.3, 26.4, 26.5, 26.6
 
+import 'dotenv/config';
 import { PrismaClient } from '../src/generated/prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { hashSync } from 'bcryptjs';

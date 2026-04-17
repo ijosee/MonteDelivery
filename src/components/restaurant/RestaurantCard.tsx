@@ -118,7 +118,7 @@ export default function RestaurantCard({ restaurant }: RestaurantCardProps) {
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 strokeWidth={1.5}
-                d="M8.25 18.75a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 0 1-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0H21M3.375 14.25h-.375a3 3 0 0 1-3-3V8.25m19.5 0a3 3 0 0 0-3-3h-1.5m-9 0H3.375m0 0A1.125 1.125 0 0 0 2.25 6.375v4.875"
+                d="M8.25 18.75a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 01-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0H21M3.375 14.25h.008M2.25 14.25V11.25a3 3 0 013-3h.75l1.072-2.143A1.5 1.5 0 018.414 5.25h1.172a1.5 1.5 0 011.342.826L12 8.25h3.75a3 3 0 013 3v3"
               />
             </svg>
             Envío {restaurant.deliveryFeeEur.toFixed(2)} €

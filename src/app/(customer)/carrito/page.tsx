@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useCart } from '@/hooks/use-cart';
+import { useCart } from '@/contexts/cart-context';
 import CartItem from '@/components/cart/CartItem';
 import CartSummary from '@/components/cart/CartSummary';
 
@@ -15,7 +15,7 @@ export default function CarritoPage() {
       <main className="mx-auto w-full max-w-2xl px-4 py-8">
         <h1 className="text-xl font-bold text-gray-900">Tu carrito</h1>
         <div className="mt-6 flex justify-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-green-600 border-t-transparent" />
         </div>
       </main>
     );
@@ -33,7 +33,7 @@ export default function CarritoPage() {
           </p>
           <Link
             href="/"
-            className="mt-2 rounded-md bg-blue-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+            className="mt-2 rounded-md bg-green-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-green-700 transition-colors"
           >
             Ver restaurantes
           </Link>
@@ -78,14 +78,14 @@ export default function CarritoPage() {
 
       {/* Summary */}
       <div className="mt-6">
-        <CartSummary subtotalEur={cart.subtotalEur} />
+        <CartSummary subtotalEur={cart.subtotalEur} deliveryFeeEur={cart.deliveryFeeEur} />
       </div>
 
       {/* Checkout button */}
       <div className="mt-6">
         <Link
           href="/checkout"
-          className="block w-full rounded-md bg-blue-600 px-6 py-3 text-center text-sm font-semibold text-white hover:bg-blue-700 transition-colors"
+          className="block w-full rounded-md bg-green-600 px-6 py-3 text-center text-sm font-semibold text-white hover:bg-green-700 transition-colors"
         >
           Ir al checkout
         </Link>

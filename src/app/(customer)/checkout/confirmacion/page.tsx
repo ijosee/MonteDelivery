@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 
@@ -17,7 +17,7 @@ interface OrderConfirmation {
   createdAt: string;
 }
 
-export default function ConfirmacionPage() {
+function ConfirmacionContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const orderId = searchParams.get('orderId');
@@ -70,16 +70,16 @@ export default function ConfirmacionPage() {
     registerLegalAndEmail();
   }, [orderId, legalRegistered]);
 
-  const formatEta = (order: OrderConfirmation): string => {
-    if (order.fulfillmentType === 'SCHEDULED' && order.eta && order.etaWindowEnd) {
-      const eta = new Date(order.eta);
-      const end = new Date(order.etaWindowEnd);
+  const formatEta = (o: OrderConfirmation): string => {
+    if (o.fulfillmentType === 'SCHEDULED' && o.eta && o.etaWindowEnd) {
+      const eta = new Date(o.eta);
+      const end = new Date(o.etaWindowEnd);
       const etaTime = `${String(eta.getHours()).padStart(2, '0')}:${String(eta.getMinutes()).padStart(2, '0')}`;
       const endTime = `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
       return `Entrega prevista: ${etaTime}–${endTime}`;
     }
-    if (order.eta) {
-      const eta = new Date(order.eta);
+    if (o.eta) {
+      const eta = new Date(o.eta);
       return `Entrega estimada: ${eta.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`;
     }
     return 'ETA calculándose...';
@@ -153,5 +153,19 @@ export default function ConfirmacionPage() {
         </Link>
       </div>
     </div>
+  );
+}
+
+export default function ConfirmacionPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center">
+          <p className="text-gray-500">Cargando confirmación...</p>
+        </div>
+      }
+    >
+      <ConfirmacionContent />
+    </Suspense>
   );
 }

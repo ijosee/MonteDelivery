@@ -18,7 +18,7 @@ export default function FABCart({ itemCount, subtotalEur }: FABCartProps) {
   return (
     <Link
       href="/carrito"
-      className="fixed bottom-20 right-4 z-50 flex items-center gap-2 rounded-full bg-blue-600 px-5 py-3 text-white shadow-lg transition-transform hover:scale-105 hover:bg-blue-700 active:scale-95 sm:bottom-6 md:hidden"
+      className="fixed bottom-20 right-4 z-50 flex items-center gap-2 rounded-full bg-green-600 px-5 py-3 text-white shadow-lg transition-transform hover:scale-105 hover:bg-green-700 active:scale-95 sm:bottom-6 md:hidden"
       aria-label={`Ver carrito: ${itemCount} artículo${itemCount === 1 ? '' : 's'}, ${subtotalEur.toFixed(2)} €`}
     >
       <span className="text-lg" aria-hidden="true">🛒</span>

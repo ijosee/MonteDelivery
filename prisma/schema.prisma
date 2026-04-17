@@ -417,7 +417,23 @@ model LegalAcceptance {
   @@map("legal_acceptances")
 }
 
-// ─── 21. AdminAuditLog ───────────────────────────────────────
+// ─── 21. PhoneVerification ────────────────────────────────────
+
+model PhoneVerification {
+  id        String   @id @default(cuid())
+  userId    String
+  phone     String
+  code      String   // 6-digit OTP
+  expiresAt DateTime
+  verified  Boolean  @default(false)
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([userId, phone])
+  @@map("phone_verifications")
+}
+
+// ─── 22. AdminAuditLog ───────────────────────────────────────
 
 model AdminAuditLog {
   id           String   @id @default(cuid())

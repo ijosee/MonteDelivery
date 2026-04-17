@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, type ReactNode } from 'react';
 import type { CartDTO } from '@/types';
 
 const EMPTY_CART: CartDTO = {
@@ -12,7 +12,28 @@ const EMPTY_CART: CartDTO = {
   subtotalEur: 0,
 };
 
-export function useCart() {
+interface AddItemResult {
+  success: boolean;
+  conflict: boolean;
+  message: string | null;
+}
+
+interface CartContextValue {
+  cart: CartDTO;
+  isLoading: boolean;
+  error: string | null;
+  itemCount: number;
+  fetchCart: () => Promise<void>;
+  addItem: (productId: string, quantity?: number, notes?: string | null) => Promise<AddItemResult>;
+  updateItem: (itemId: string, data: { quantity?: number; notes?: string | null }) => Promise<void>;
+  removeItem: (itemId: string) => Promise<void>;
+  clearCart: () => Promise<void>;
+  clearAndAdd: (productId: string, quantity?: number, notes?: string | null) => Promise<AddItemResult | undefined>;
+}
+
+const CartContext = createContext<CartContextValue | null>(null);
+
+export function CartProvider({ children }: { readonly children: ReactNode }) {
   const [cart, setCart] = useState<CartDTO>(EMPTY_CART);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +61,7 @@ export function useCart() {
   }, [fetchCart]);
 
   const addItem = useCallback(
-    async (productId: string, quantity: number = 1, notes?: string | null) => {
+    async (productId: string, quantity: number = 1, notes?: string | null): Promise<AddItemResult> => {
       try {
         setError(null);
         const res = await fetch('/api/cart/items', {
@@ -51,7 +72,6 @@ export function useCart() {
         const json = await res.json();
 
         if (res.status === 409) {
-          // Restaurant conflict — return the error info so the UI can show a dialog
           return { success: false, conflict: true, message: json.error as string };
         }
 
@@ -134,7 +154,7 @@ export function useCart() {
 
   const itemCount = cart.items.reduce((sum, item) => sum + item.quantity, 0);
 
-  return {
+  const value = useMemo<CartContextValue>(() => ({
     cart,
     isLoading,
     error,
@@ -145,5 +165,19 @@ export function useCart() {
     removeItem,
     clearCart,
     clearAndAdd,
-  };
+  }), [cart, isLoading, error, itemCount, fetchCart, addItem, updateItem, removeItem, clearCart, clearAndAdd]);
+
+  return (
+    <CartContext value={value}>
+      {children}
+    </CartContext>
+  );
+}
+
+export function useCart(): CartContextValue {
+  const context = useContext(CartContext);
+  if (!context) {
+    throw new Error('useCart must be used within a CartProvider');
+  }
+  return context;
 }
