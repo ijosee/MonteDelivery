@@ -2,17 +2,17 @@ name: Deploy
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
     inputs:
       environment:
-        description: Target deployment environment
+        description: "Entorno de despliegue"
+        required: true
+        default: "production"
         type: choice
         options:
           - staging
           - production
-        default: production
       run_seed:
         description: Run seed script after migrations
         type: boolean
@@ -23,17 +23,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  quality-gate:
+  # ─── Verificaciones de calidad ────────────────────────────────────────────
+  quality:
+    name: Quality Checks
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: pnpm
@@ -49,7 +48,7 @@ jobs:
       - name: Lint
         run: pnpm run lint
 
-      - name: Type-check
+      - name: Type check
         run: npx tsc --noEmit
 
       - name: Unit tests
@@ -58,7 +57,7 @@ jobs:
       - name: Build
         run: pnpm run build
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_URL: "postgresql://dummy:dummy@localhost:5432/dummy"
           NEXTAUTH_URL: ${{ secrets.NEXTAUTH_URL }}
           NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
@@ -67,19 +66,18 @@ jobs:
           SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
           SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
 
+  # ─── Migraciones de base de datos (Prisma) ─────────────────────────────
   migrate:
-    needs: quality-gate
+    name: Database Migrations
+    needs: quality
     runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment || 'production' }}
+    environment: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.environment) || 'production' }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: pnpm
@@ -92,20 +90,19 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
+  # ─── Seed (solo manual) ──────────────────────────────────────────────────
   seed:
+    name: Seed Database
     needs: migrate
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.run_seed == 'true'
     environment: ${{ github.event.inputs.environment || 'production' }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: pnpm
@@ -123,56 +120,40 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
+  # ─── Despliegue en Vercel ─────────────────────────────────────────────────
   deploy:
-    needs: [migrate, seed]
-    if: always() && needs.migrate.result == 'success' && (needs.seed.result == 'success' || needs.seed.result == 'skipped')
+    name: Deploy to Vercel
+    needs: [quality, migrate, seed]
+    if: always() && needs.quality.result == 'success' && needs.migrate.result == 'success' && (needs.seed.result == 'success' || needs.seed.result == 'skipped')
     runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment || 'production' }}
+    environment: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.environment) || 'production' }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       - name: Install Vercel CLI
-        run: pnpm add -g vercel
+        run: npm install -g vercel
 
       - name: Pull Vercel environment
-        run: vercel pull --yes --environment=${{ github.event.inputs.environment || 'production' }} --token=${{ secrets.VERCEL_TOKEN }}
+        run: vercel pull --yes --environment=${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.environment) || 'production' }} --token=${{ secrets.VERCEL_TOKEN }}
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
-      - name: Build with Vercel
-        run: |
-          if [ "${{ github.event.inputs.environment || 'production' }}" = "production" ]; then
-            vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
-          else
-            vercel build --token=${{ secrets.VERCEL_TOKEN }}
-          fi
+      - name: Build project
+        run: vercel build ${{ ((github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production') || github.event_name == 'push') && '--prod' || '' }} --token=${{ secrets.VERCEL_TOKEN }}
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
       - name: Deploy to Vercel
-        id: vercel-deploy
+        id: deploy
         run: |
-          if [ "${{ github.event.inputs.environment || 'production' }}" = "production" ]; then
-            DEPLOY_URL=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }})
-          else
-            DEPLOY_URL=$(vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }})
-          fi
-          echo "url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
+          URL=$(vercel deploy --prebuilt ${{ ((github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production') || github.event_name == 'push') && '--prod' || '' }} --token=${{ secrets.VERCEL_TOKEN }})
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -181,6 +162,6 @@ jobs:
         run: |
           echo "## Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **URL:** ${{ steps.vercel-deploy.outputs.url }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Environment:** ${{ github.event.inputs.environment || 'production' }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Actor:** ${{ github.actor }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **URL**: ${{ steps.deploy.outputs.url }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Environment**: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.environment) || 'production' }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Triggered by**: ${{ github.actor }}" >> "$GITHUB_STEP_SUMMARY"
