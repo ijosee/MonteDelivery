@@ -30,8 +30,7 @@ default_pool_size = 20
 max_client_conn = 100
 
 [db.migrations]
-# Disabled — Prisma handles migrations via `npx prisma migrate deploy`
-enabled = false
+enabled = true
 schema_paths = []
 
 [db.seed]
