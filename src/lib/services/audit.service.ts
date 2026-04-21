@@ -1,8 +1,7 @@
 // src/lib/services/audit.service.ts
 // AuditService — Logs administrative and data access operations
-// Requisitos: 8.7, 16.6, 25.8
 
-import { prisma } from '@/lib/db';
+import { createServiceClient } from '@/lib/supabase/service';
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -26,17 +25,15 @@ export interface AuditEntry {
  */
 export async function logAudit(entry: AuditEntry): Promise<void> {
   try {
-    await prisma.adminAuditLog.create({
-      data: {
-        userId: entry.userId,
-        action: entry.action,
-        resourceType: entry.resourceType,
-        resourceId: entry.resourceId ?? null,
-        details: entry.details
-          ? (structuredClone(entry.details) as Record<string, never>)
-          : undefined,
-        ipAddress: entry.ipAddress ?? null,
-      },
+    const supabase = createServiceClient();
+
+    await supabase.from('admin_audit_log').insert({
+      userId: entry.userId,
+      action: entry.action,
+      resourceType: entry.resourceType,
+      resourceId: entry.resourceId ?? null,
+      details: entry.details ? (structuredClone(entry.details) as Record<string, never>) : null,
+      ipAddress: entry.ipAddress ?? null,
     });
   } catch (error) {
     // Audit logging should never break the main operation

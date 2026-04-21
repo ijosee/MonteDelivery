@@ -29,7 +29,7 @@ export interface OrderConfirmationData {
 // ─── Constants ───────────────────────────────────────────────
 
 const FROM_EMAIL = process.env.EMAIL_FROM ?? 'Pueblo Delivery <noreply@pueblodelivery.es>';
-const APP_URL = process.env.NEXTAUTH_URL ?? 'http://localhost:3000';
+const APP_URL = process.env.APP_URL ?? (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
 
 // ─── Core Send Function ──────────────────────────────────────
 

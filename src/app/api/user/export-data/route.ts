@@ -1,98 +1,70 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
-import { auth } from '@/lib/auth/auth';
+import { createClient } from '@/lib/supabase/server';
+import { getAuthUser } from '@/lib/auth/session';
 import { logAudit } from '@/lib/services/audit.service';
 
 /**
  * POST /api/user/export-data — Export all personal data as JSON (GDPR Art. 20).
- * Requisitos: 16.3
  */
 export async function POST(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const authUser = await getAuthUser();
+    if (!authUser) {
       return NextResponse.json(
         { success: false, error: 'No autenticado' },
         { status: 401 }
       );
     }
 
-    const userId = session.user.id;
+    const userId = authUser.id;
     const ipAddress =
       request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? null;
 
+    const supabase = await createClient();
+
     // Fetch all personal data
-    const [user, addresses, orders, cookieConsents, legalAcceptances] =
+    const [userRes, addressesRes, ordersRes, cookieConsentsRes, legalAcceptancesRes] =
       await Promise.all([
-        prisma.user.findUnique({
-          where: { id: userId },
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            role: true,
-            createdAt: true,
-            updatedAt: true,
-          },
-        }),
-        prisma.address.findMany({
-          where: { userId },
-          select: {
-            id: true,
-            label: true,
-            street: true,
-            municipality: true,
-            city: true,
-            postalCode: true,
-            floorDoor: true,
-            createdAt: true,
-          },
-        }),
-        prisma.order.findMany({
-          where: { userId },
-          select: {
-            id: true,
-            orderNumber: true,
-            fulfillmentType: true,
-            subtotalEur: true,
-            deliveryFeeEur: true,
-            totalEur: true,
-            currentStatus: true,
-            createdAt: true,
-            items: {
-              select: {
-                productName: true,
-                productPriceEur: true,
-                quantity: true,
-              },
-            },
-          },
-        }),
-        prisma.cookieConsent.findMany({
-          where: { userId },
-          select: {
-            consentType: true,
-            decision: true,
-            createdAt: true,
-          },
-        }),
-        prisma.legalAcceptance.findMany({
-          where: { userId },
-          select: {
-            documentType: true,
-            documentVersion: true,
-            createdAt: true,
-          },
-        }),
+        supabase
+          .from('users')
+          .select('id, name, email, role, createdAt, updatedAt')
+          .eq('id', userId)
+          .single(),
+        supabase
+          .from('addresses')
+          .select('id, label, street, municipality, city, postalCode, floorDoor, createdAt')
+          .eq('userId', userId),
+        supabase
+          .from('orders')
+          .select('id, orderNumber, fulfillmentType, subtotalEur, deliveryFeeEur, totalEur, currentStatus, createdAt, order_items(productName, productPriceEur, quantity)')
+          .eq('userId', userId),
+        supabase
+          .from('cookie_consents')
+          .select('consentType, decision, createdAt')
+          .eq('userId', userId),
+        supabase
+          .from('legal_acceptances')
+          .select('documentType, documentVersion, createdAt')
+          .eq('userId', userId),
       ]);
 
     const exportData = {
       exportDate: new Date().toISOString(),
-      user,
-      addresses,
-      orders,
-      cookieConsents,
-      legalAcceptances,
+      user: userRes.data,
+      addresses: addressesRes.data ?? [],
+      orders: (ordersRes.data ?? []).map((o: Record<string, unknown>) => ({
+        id: o.id,
+        orderNumber: o.orderNumber,
+        fulfillmentType: o.fulfillmentType,
+        subtotalEur: o.subtotalEur,
+        deliveryFeeEur: o.deliveryFeeEur,
+        totalEur: o.totalEur,
+        currentStatus: o.currentStatus,
+        createdAt: o.createdAt,
+        items: o.order_items,
+      })),
+      cookieConsents: cookieConsentsRes.data ?? [],
+      legalAcceptances: legalAcceptancesRes.data ?? [],
     };
 
     // Log the export in audit

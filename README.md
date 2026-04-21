@@ -8,8 +8,7 @@ Marketplace de delivery para pueblos y ciudades de Andalucía. Conecta clientes 
 |---|---|
 | Next.js 16 (App Router) + TypeScript | Framework full-stack |
 | Tailwind CSS v4 | Estilos mobile-first |
-| Prisma 7 + Supabase PostgreSQL | ORM + Base de datos |
-| Auth.js v5 | Autenticación (email + Google OAuth) |
+| Supabase (PostgreSQL + Auth + RLS) | Base de datos y autenticación |
 | CartoCiudad | Geocodificación (gratuito, gobierno español) |
 | Cloudflare R2 | Almacenamiento de imágenes |
 | Resend | Envío de emails |
@@ -35,14 +34,11 @@ Marketplace de delivery para pueblos y ciudades de Andalucía. Conecta clientes 
 # 1. Instalar dependencias
 pnpm install
 
-# 2. Generar el cliente Prisma
-pnpm prisma generate
-
-# 3. Levantar todo: Supabase local + migraciones + seed
+# 2. Levantar todo: Supabase local + migraciones + seed
 chmod +x scripts/setup.sh
 ./scripts/setup.sh
 
-# 4. Arrancar la app
+# 3. Arrancar la app
 pnpm dev
 ```
 
@@ -51,7 +47,7 @@ Abre **http://localhost:3000**. Listo.
 ### Qué hace `setup.sh`
 
 1. Arranca Supabase local con Docker (`supabase start`) — PostgreSQL, Studio, Auth, Storage, Inbucket
-2. Aplica las migraciones de Prisma contra la DB local (`prisma migrate deploy`)
+2. Aplica las migraciones SQL contra la DB local
 3. Carga los datos de prueba vía SQL (`psql -f supabase/seed.sql`)
 4. Muestra las URLs de los servicios y las credenciales de acceso
 
@@ -75,18 +71,15 @@ pnpm install
 
 # 2. Copiar y configurar variables de entorno
 cp .env.example .env
-# Edita .env y pon tu DATABASE_URL (local o remota de Supabase)
+# Edita .env con tus credenciales de Supabase (URL, anon key, service role key)
 
-# 3. Generar cliente Prisma
-pnpm prisma generate
+# 3. Aplicar migraciones
+supabase db push
 
-# 4. Aplicar migraciones
-npx prisma migrate deploy
+# 4. Cargar datos de prueba (opcional)
+pnpm seed
 
-# 5. Cargar datos de prueba (opcional)
-pnpm prisma:seed
-
-# 6. Arrancar
+# 5. Arrancar
 pnpm dev
 ```
 
@@ -119,22 +112,20 @@ Otros clientes: `carlos@ejemplo.es`, `elena@ejemplo.es`, `miguel@ejemplo.es`, `s
 | `pnpm test:watch` | Tests en modo watch |
 | `pnpm test:integration` | Tests de integración |
 | `pnpm test:e2e` | Tests E2E (Playwright) |
-| `pnpm prisma:seed` | Cargar datos de prueba vía TypeScript |
-| `pnpm prisma studio` | Explorar la DB visualmente |
+| `pnpm seed` | Cargar datos de prueba vía TypeScript |
+| `pnpm gen:types` | Regenerar tipos TypeScript desde esquema Supabase |
 
 ---
 
 ## ⚙️ Variables de entorno
 
-Copia `.env.example` a `.env`. Con el setup local (Docker), solo necesitas ejecutar `setup.sh` — el `.env` ya viene configurado para la DB local.
+Copia `.env.example` a `.env`. Con el setup local (Docker), solo necesitas ejecutar `setup.sh` — el `.env` ya viene configurado para Supabase local.
 
 | Variable | Obligatoria | Descripción |
 |---|---|---|
-| `DATABASE_URL` | ✅ | Connection string PostgreSQL (local o Supabase cloud) |
-| `NEXTAUTH_URL` | ✅ | URL base de la app (`http://localhost:3000` en dev) |
-| `NEXTAUTH_SECRET` | ✅ | Secret para Auth.js (generar con `openssl rand -base64 32`) |
-| `GOOGLE_CLIENT_ID` | ❌ | Para login con Google (opcional) |
-| `GOOGLE_CLIENT_SECRET` | ❌ | Para login con Google (opcional) |
+| `NEXT_PUBLIC_SUPABASE_URL` | ✅ | URL pública del proyecto Supabase |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | ✅ | Clave pública (anon) de Supabase |
+| `SUPABASE_SERVICE_ROLE_KEY` | ✅ | Clave privada con permisos elevados (solo servidor) |
 | `CARTOCIUDAD_BASE_URL` | ✅ | Ya configurada (API gratuita del gobierno) |
 | `CLOUDFLARE_R2_*` | ❌ | Para subir imágenes (opcional en dev) |
 | `RESEND_API_KEY` | ❌ | Emails se muestran en consola en dev |
@@ -151,7 +142,7 @@ El proyecto tiene dos formas de desplegar: automática (GitHub Actions) y manual
 Cada push a `main` ejecuta automáticamente:
 
 ```
-CI (lint + type-check + tests) → Migraciones Prisma → Deploy a Vercel
+CI (lint + type-check + tests) → Migraciones Supabase → Deploy a Vercel
 ```
 
 También puedes disparar un deploy manual desde **GitHub Actions → Deploy → Run workflow**, eligiendo entorno (`staging` o `production`) y si ejecutar el seed.
@@ -168,7 +159,7 @@ Ver [DEPLOYMENT.md](DEPLOYMENT.md) para la configuración completa de secrets y 
 ./scripts/deploy.sh production
 ```
 
-El script ejecuta: verificación de rama → lint → type-check → tests → build → migraciones Prisma → deploy a Vercel.
+El script ejecuta: verificación de rama → lint → type-check → tests → build → migraciones Supabase → deploy a Vercel.
 
 ### Configurar Vercel
 
@@ -177,9 +168,9 @@ El script ejecuta: verificación de rama → lint → type-check → tests → b
 
 | Variable | Valor |
 |---|---|
-| `DATABASE_URL` | Connection string de Supabase producción |
-| `NEXTAUTH_URL` | `https://tu-dominio.vercel.app` |
-| `NEXTAUTH_SECRET` | Generar con `openssl rand -base64 32` |
+| `NEXT_PUBLIC_SUPABASE_URL` | URL de tu proyecto Supabase |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Clave anon de Supabase |
+| `SUPABASE_SERVICE_ROLE_KEY` | Clave service role de Supabase |
 | `CARTOCIUDAD_BASE_URL` | `https://www.cartociudad.es/geocoder/api/geocoder` |
 | `SENTRY_DSN` | DSN de tu proyecto Sentry |
 | `NEXT_PUBLIC_SENTRY_DSN` | Mismo valor que `SENTRY_DSN` |
@@ -190,9 +181,9 @@ El script ejecuta: verificación de rama → lint → type-check → tests → b
 ### Configurar Supabase (producción)
 
 1. Crea un proyecto en [supabase.com](https://supabase.com)
-2. Copia la connection string (Settings → Database → URI)
-3. Aplica migraciones: `DATABASE_URL="tu-url-prod" npx prisma migrate deploy`
-4. (Opcional) Seed: `DATABASE_URL="tu-url-prod" pnpm prisma:seed`
+2. Copia las credenciales (Settings → API): URL, anon key, service role key
+3. Aplica migraciones: `supabase db push --linked`
+4. (Opcional) Seed: `pnpm seed`
 
 ---
 
@@ -201,15 +192,14 @@ El script ejecuta: verificación de rama → lint → type-check → tests → b
 ```
 monte-delivery/
 ├── .github/workflows/     # CI/CD (ci.yml + deploy.yml)
-├── prisma/
-│   ├── schema.prisma      # Schema de 21 tablas
-│   ├── migrations/        # Migraciones SQL
-│   └── seed.ts            # Datos de prueba (TypeScript)
+├── prisma/                # Schema y migraciones históricas (referencia)
 ├── scripts/
 │   ├── setup.sh           # Setup local (Supabase + migraciones + seed)
+│   ├── seed.ts            # Datos de prueba (TypeScript + Supabase client)
 │   └── deploy.sh          # Deploy manual (staging/production)
 ├── supabase/
 │   ├── config.toml        # Config de Supabase local (Docker)
+│   ├── migrations/        # Migraciones SQL
 │   └── seed.sql           # Datos de prueba (SQL, usado por setup.sh)
 ├── src/
 │   ├── app/               # Next.js App Router
@@ -222,10 +212,11 @@ monte-delivery/
 │   ├── lib/               # Lógica de negocio
 │   │   ├── domain/        # Funciones puras (FSM, ETA, Haversine, Slots)
 │   │   ├── services/      # Geocoding, Email, Storage, Audit
-│   │   ├── auth/          # Auth.js config + RBAC
+│   │   ├── auth/          # RBAC + session helpers
+│   │   ├── supabase/      # Clientes Supabase (server, client, middleware, service)
 │   │   └── validators/    # Schemas Zod
 │   ├── hooks/             # useCart, usePolling, useAddressSearch
-│   └── types/             # Tipos compartidos
+│   └── types/             # Tipos compartidos (database.ts generado)
 ├── public/allergen-icons/  # 14 SVGs de alérgenos UE
 ├── DEPLOYMENT.md           # Guía de CI/CD y secrets de GitHub
 ├── .env.example            # Plantilla de variables de entorno
@@ -237,19 +228,16 @@ monte-delivery/
 ## 🐛 Solución de problemas
 
 ### "Error: connect ECONNREFUSED" al ejecutar migraciones
-→ Si usas Supabase local, verifica que Docker está corriendo y ejecuta `supabase start`. Si usas Supabase cloud, verifica la `DATABASE_URL` en `.env`.
+→ Si usas Supabase local, verifica que Docker está corriendo y ejecuta `supabase start`. Si usas Supabase cloud, verifica las variables de entorno en `.env`.
 
 ### "Error: P1001: Can't reach database server"
 → Tu IP puede estar bloqueada en Supabase cloud. Ve a Settings → Database → Network y verifica que tu IP está permitida.
 
 ### "Error: relation does not exist"
-→ No has ejecutado las migraciones. Ejecuta `npx prisma migrate deploy`.
+→ No has ejecutado las migraciones. Ejecuta `supabase db push` o `supabase migration up`.
 
 ### "Error: Unique constraint failed on the fields: (`email`)"
 → El seed ya se ejecutó antes. Puedes ignorar el error o resetear la DB.
-
-### El login con Google no funciona
-→ Es opcional. Configura `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET` en `.env`. Para desarrollo, usa email/password.
 
 ### Los emails no llegan
 → En desarrollo local, los emails se muestran en la consola del servidor. Para emails reales, configura `RESEND_API_KEY`.

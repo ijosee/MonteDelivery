@@ -3,7 +3,7 @@
 # Pueblo Delivery — Local Development Setup
 # ═══════════════════════════════════════════════════════════════════════════════
 # Initializes the local Supabase environment (PostgreSQL via Docker),
-# applies Prisma migrations, and seeds the database.
+# applies migrations, and seeds the database.
 #
 # Prerequisites:
 #   - Supabase CLI installed (https://supabase.com/docs/guides/cli)
@@ -39,9 +39,9 @@ supabase start
 log_ok "Servicios de Supabase iniciados"
 echo ""
 
-# 2. Apply Prisma migrations to the local Supabase PostgreSQL
-log_info "Aplicando migraciones de Prisma..."
-DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres" npx prisma migrate deploy
+# 2. Apply Supabase migrations to the local PostgreSQL
+log_info "Aplicando migraciones de Supabase..."
+supabase db push --local
 log_ok "Migraciones aplicadas"
 echo ""
 

@@ -1,16 +1,37 @@
 'use client';
 
-import { Suspense, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { createClient } from '@/lib/supabase/client';
 
 function ResetPasswordContent() {
   const searchParams = useSearchParams();
-  const token = searchParams.get('token');
+  const [hasSession, setHasSession] = useState<boolean | null>(null);
 
-  if (token) {
-    return <ResetForm token={token} />;
+  useEffect(() => {
+    // Check if the user has an active session (set by the callback route after clicking the reset link)
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setHasSession(!!user);
+    });
+  }, []);
+
+  // If we have a session (user clicked the reset link and was redirected via callback), show the reset form
+  if (hasSession === null) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <p className="text-gray-500">Cargando...</p>
+      </div>
+    );
   }
+
+  // Check for legacy token param or active session
+  const token = searchParams.get('token');
+  if (hasSession || token) {
+    return <ResetForm />;
+  }
+
   return <RequestForm />;
 }
 
@@ -129,7 +150,7 @@ function RequestForm() {
   );
 }
 
-function ResetForm({ token }: { token: string }) {
+function ResetForm() {
   const [password, setPassword] = useState('');
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -144,7 +165,7 @@ function ResetForm({ token }: { token: string }) {
       const res = await fetch('/api/auth/reset-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, password }),
+        body: JSON.stringify({ password }),
       });
 
       if (!res.ok) {

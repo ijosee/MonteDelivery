@@ -5,8 +5,8 @@
 -- 10 addresses, 12 orders with items and status history.
 --
 -- IMPORTANT: This file contains ONLY INSERT statements.
--- Tables are created by Prisma migrations (`npx prisma migrate deploy`).
--- Run this AFTER migrations: psql $DATABASE_URL -f supabase/seed.sql
+-- Tables are created by Supabase migrations (supabase/migrations/).
+-- Run this AFTER migrations: psql <connection-string> -f supabase/seed.sql
 --
 -- All passwords: Password123!
 -- bcrypt hash: $2b$10$seJWVQSGNX1FF0oEO9VoUujJ2LRmVBuZ2FJYy6e5F5RLqjwE1H71m

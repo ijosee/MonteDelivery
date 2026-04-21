@@ -1,11 +1,9 @@
-import { NextResponse } from 'next/server';
-import { auth } from '@/lib/auth/auth';
-import { prisma } from '@/lib/db';
-import { createAddressSchema } from '@/lib/validators/address.schema';
-import { geocodeAddress } from '@/lib/services/geocoding.service';
-import { ERRORS } from '@/lib/errors';
-
-export const dynamic = 'force-dynamic';
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { getAuthUser } from "@/lib/auth/session";
+import { createAddressSchema } from "@/lib/validators/address.schema";
+import { geocodeAddress } from "@/lib/services/geocoding.service";
+import { ERRORS } from "@/lib/errors";
 
 /**
  * GET /api/addresses — List the authenticated user's saved addresses.
@@ -13,29 +11,29 @@ export const dynamic = 'force-dynamic';
  */
 export async function GET() {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const authUser = await getAuthUser();
+    if (!authUser) {
       return NextResponse.json(
-        { data: null, error: 'No autenticado', success: false },
+        { data: null, error: "No autenticado", success: false },
         { status: 401 }
       );
     }
 
-    const addresses = await prisma.address.findMany({
-      where: { userId: session.user.id },
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        label: true,
-        street: true,
-        municipality: true,
-        city: true,
-        postalCode: true,
-        floorDoor: true,
-        createdAt: true,
-        // lat and lng intentionally excluded (GDPR)
-      },
-    });
+    const supabase = await createClient();
+
+    const { data: addresses, error } = await supabase
+      .from("addresses")
+      .select("id, label, street, municipality, city, postalCode, floorDoor, createdAt")
+      .eq("userId", authUser.id)
+      .order("createdAt", { ascending: false });
+
+    if (error) {
+      console.error("Error fetching addresses:", error);
+      return NextResponse.json(
+        { data: null, error: "Error al obtener las direcciones", success: false },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       data: addresses,
@@ -43,9 +41,9 @@ export async function GET() {
       success: true,
     });
   } catch (error) {
-    console.error('Error fetching addresses:', error);
+    console.error("Error fetching addresses:", error);
     return NextResponse.json(
-      { data: null, error: 'Error al obtener las direcciones', success: false },
+      { data: null, error: "Error al obtener las direcciones", success: false },
       { status: 500 }
     );
   }
@@ -61,10 +59,10 @@ export async function GET() {
  */
 export async function POST(request: Request) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const authUser = await getAuthUser();
+    if (!authUser) {
       return NextResponse.json(
-        { data: null, error: 'No autenticado', success: false },
+        { data: null, error: "No autenticado", success: false },
         { status: 401 }
       );
     }
@@ -72,7 +70,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     const parsed = createAddressSchema.safeParse(body);
     if (!parsed.success) {
-      const firstError = parsed.error.issues[0]?.message ?? 'Datos inválidos.';
+      const firstError = parsed.error.issues[0]?.message ?? "Datos inválidos.";
       return NextResponse.json(
         { data: null, error: firstError, success: false },
         { status: 422 }
@@ -130,10 +128,13 @@ export async function POST(request: Request) {
       );
     }
 
+    const supabase = await createClient();
+
     // Store address with lat/lng
-    const address = await prisma.address.create({
-      data: {
-        userId: session.user.id,
+    const { data: address, error } = await supabase
+      .from("addresses")
+      .insert({
+        userId: authUser.id,
         label: label ?? null,
         street,
         municipality,
@@ -142,28 +143,26 @@ export async function POST(request: Request) {
         floorDoor: floorDoor ?? null,
         lat: geocodingResult.lat,
         lng: geocodingResult.lng,
-      },
-      select: {
-        id: true,
-        label: true,
-        street: true,
-        municipality: true,
-        city: true,
-        postalCode: true,
-        floorDoor: true,
-        createdAt: true,
-        // lat and lng intentionally excluded (GDPR)
-      },
-    });
+      })
+      .select("id, label, street, municipality, city, postalCode, floorDoor, createdAt")
+      .single();
+
+    if (error) {
+      console.error("Error creating address:", error);
+      return NextResponse.json(
+        { data: null, error: "Error al crear la dirección", success: false },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json(
       { data: address, error: null, success: true },
       { status: 201 }
     );
   } catch (error) {
-    console.error('Error creating address:', error);
+    console.error("Error creating address:", error);
     return NextResponse.json(
-      { data: null, error: 'Error al crear la dirección', success: false },
+      { data: null, error: "Error al crear la dirección", success: false },
       { status: 500 }
     );
   }

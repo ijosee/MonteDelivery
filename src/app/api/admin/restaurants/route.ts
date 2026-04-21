@@ -1,43 +1,61 @@
 import { type NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/lib/auth/auth';
-import { prisma } from '@/lib/db';
+import { createClient } from '@/lib/supabase/server';
+import { getAuthUserWithRole } from '@/lib/auth/session';
 import { requirePermission } from '@/lib/auth/rbac';
 import { logAudit } from '@/lib/services/audit.service';
-import type { UserRole } from '@/generated/prisma/client';
-
-export const dynamic = 'force-dynamic';
+import type { UserRole, Database } from '@/types/database';
 
 /**
  * GET /api/admin/restaurants — List all restaurants with stats.
  */
 export async function GET(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const authUser = await getAuthUserWithRole();
+    if (!authUser) {
       return NextResponse.json({ data: null, error: 'No autenticado', success: false }, { status: 401 });
     }
-    requirePermission(session.user.role as UserRole, 'restaurants:list');
+    requirePermission(authUser.role as UserRole, 'restaurants:list');
 
     const { searchParams } = new URL(request.url);
     const page = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10));
     const limit = Math.min(50, Math.max(1, parseInt(searchParams.get('limit') ?? '20', 10)));
     const skip = (page - 1) * limit;
 
-    const [restaurants, total] = await Promise.all([
-      prisma.restaurant.findMany({
-        orderBy: { name: 'asc' },
-        skip,
-        take: limit,
-        include: {
-          _count: { select: { orders: true } },
-        },
-      }),
-      prisma.restaurant.count(),
-    ]);
+    const supabase = await createClient();
+
+    const { data: restaurants, count, error } = await supabase
+      .from('restaurants')
+      .select('id, name, slug, cuisineType, isActive, deliveryFeeEur, minOrderEur, createdAt', { count: 'exact' })
+      .order('name', { ascending: true })
+      .range(skip, skip + limit - 1);
+
+    if (error) {
+      console.error('Error fetching restaurants:', error);
+      return NextResponse.json({ data: null, error: 'Error interno del servidor', success: false }, { status: 500 });
+    }
+
+    const total = count ?? 0;
+
+    // Get order counts per restaurant
+    const restaurantIds = (restaurants ?? []).map((r) => r.id);
+    const orderCounts: Record<string, number> = {};
+
+    if (restaurantIds.length > 0) {
+      const { data: orders } = await supabase
+        .from('orders')
+        .select('restaurantId')
+        .in('restaurantId', restaurantIds);
+
+      if (orders) {
+        for (const o of orders) {
+          orderCounts[o.restaurantId] = (orderCounts[o.restaurantId] ?? 0) + 1;
+        }
+      }
+    }
 
     return NextResponse.json({
       data: {
-        restaurants: restaurants.map((r: typeof restaurants[number]) => ({
+        restaurants: (restaurants ?? []).map((r) => ({
           id: r.id,
           name: r.name,
           slug: r.slug,
@@ -45,8 +63,8 @@ export async function GET(request: NextRequest) {
           isActive: r.isActive,
           deliveryFeeEur: Number(r.deliveryFeeEur),
           minOrderEur: Number(r.minOrderEur),
-          orderCount: r._count.orders,
-          createdAt: r.createdAt.toISOString(),
+          orderCount: orderCounts[r.id] ?? 0,
+          createdAt: r.createdAt,
         })),
         pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
       },
@@ -65,11 +83,11 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: Request) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const authUser = await getAuthUserWithRole();
+    if (!authUser) {
       return NextResponse.json({ data: null, error: 'No autenticado', success: false }, { status: 401 });
     }
-    requirePermission(session.user.role as UserRole, 'restaurants:create');
+    requirePermission(authUser.role as UserRole, 'restaurants:create');
 
     const body = await request.json();
     const { name, slug, description, cuisineType, deliveryFeeEur, minOrderEur, deliveryRadiusKm, lat, lng } = body;
@@ -78,8 +96,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ data: null, error: 'Nombre y slug son obligatorios', success: false }, { status: 422 });
     }
 
-    const restaurant = await prisma.restaurant.create({
-      data: {
+    const supabase = await createClient();
+
+    const { data: restaurant, error } = await supabase
+      .from('restaurants')
+      .insert({
         name: name.trim(),
         slug: slug.trim(),
         description: description || null,
@@ -89,11 +110,18 @@ export async function POST(request: Request) {
         deliveryRadiusKm: deliveryRadiusKm ?? 5,
         lat: lat ?? 0,
         lng: lng ?? 0,
-      },
-    });
+        updatedAt: new Date().toISOString(),
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error creating restaurant:', error);
+      return NextResponse.json({ data: null, error: 'Error al crear restaurante', success: false }, { status: 500 });
+    }
 
     logAudit({
-      userId: session.user.id,
+      userId: authUser.id,
       action: 'RESTAURANT_CREATED',
       resourceType: 'restaurant',
       resourceId: restaurant.id,
@@ -117,11 +145,11 @@ export async function POST(request: Request) {
  */
 export async function PATCH(request: Request) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const authUser = await getAuthUserWithRole();
+    if (!authUser) {
       return NextResponse.json({ data: null, error: 'No autenticado', success: false }, { status: 401 });
     }
-    requirePermission(session.user.role as UserRole, 'restaurants:edit');
+    requirePermission(authUser.role as UserRole, 'restaurants:edit');
 
     const body = await request.json();
     const { id, ...updates } = body;
@@ -130,18 +158,31 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ data: null, error: 'ID es obligatorio', success: false }, { status: 422 });
     }
 
-    const data: Record<string, unknown> = {};
+    const data: Database['public']['Tables']['restaurants']['Update'] = {};
     if (typeof updates.name === 'string') data.name = updates.name.trim();
     if (typeof updates.description === 'string') data.description = updates.description;
     if (typeof updates.cuisineType === 'string') data.cuisineType = updates.cuisineType;
     if (typeof updates.isActive === 'boolean') data.isActive = updates.isActive;
     if (typeof updates.deliveryFeeEur === 'number') data.deliveryFeeEur = updates.deliveryFeeEur;
     if (typeof updates.minOrderEur === 'number') data.minOrderEur = updates.minOrderEur;
+    data.updatedAt = new Date().toISOString();
 
-    const updated = await prisma.restaurant.update({ where: { id }, data });
+    const supabase = await createClient();
+
+    const { data: updated, error } = await supabase
+      .from('restaurants')
+      .update(data)
+      .eq('id', id)
+      .select('id, name, isActive')
+      .single();
+
+    if (error) {
+      console.error('Error updating restaurant:', error);
+      return NextResponse.json({ data: null, error: 'Error al actualizar restaurante', success: false }, { status: 500 });
+    }
 
     logAudit({
-      userId: session.user.id,
+      userId: authUser.id,
       action: updates.isActive !== undefined ? 'RESTAURANT_TOGGLED' : 'RESTAURANT_UPDATED',
       resourceType: 'restaurant',
       resourceId: id,

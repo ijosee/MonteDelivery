@@ -1,10 +1,8 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@/lib/auth/auth';
-import { prisma } from '@/lib/db';
+import { createClient } from '@/lib/supabase/server';
+import { getAuthUserWithRole } from '@/lib/auth/session';
 import { requirePermission } from '@/lib/auth/rbac';
-import type { UserRole } from '@/generated/prisma/client';
-
-export const dynamic = 'force-dynamic';
+import type { UserRole } from '@/types/database';
 
 /**
  * GET /api/admin/metrics — Dashboard metrics.
@@ -12,11 +10,11 @@ export const dynamic = 'force-dynamic';
  */
 export async function GET() {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const authUser = await getAuthUserWithRole();
+    if (!authUser) {
       return NextResponse.json({ data: null, error: 'No autenticado', success: false }, { status: 401 });
     }
-    requirePermission(session.user.role as UserRole, 'metrics:read_all');
+    requirePermission(authUser.role as UserRole, 'metrics:read_all');
 
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -24,44 +22,62 @@ export async function GET() {
     startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay() + 1); // Monday
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
+    const supabase = await createClient();
+
+    // Count orders by time period using head: true for count only
     const [
-      ordersToday,
-      ordersWeek,
-      ordersMonth,
-      ordersByStatus,
-      revenueToday,
-      revenueWeek,
-      revenueMonth,
-      activeRestaurants,
-      totalUsers,
+      ordersTodayRes,
+      ordersWeekRes,
+      ordersMonthRes,
+      activeRestaurantsRes,
+      totalUsersRes,
     ] = await Promise.all([
-      prisma.order.count({ where: { createdAt: { gte: startOfDay } } }),
-      prisma.order.count({ where: { createdAt: { gte: startOfWeek } } }),
-      prisma.order.count({ where: { createdAt: { gte: startOfMonth } } }),
-      prisma.order.groupBy({
-        by: ['currentStatus'],
-        _count: { id: true },
-      }),
-      prisma.order.aggregate({
-        where: { createdAt: { gte: startOfDay }, currentStatus: { notIn: ['CANCELLED', 'REJECTED'] } },
-        _sum: { totalEur: true },
-      }),
-      prisma.order.aggregate({
-        where: { createdAt: { gte: startOfWeek }, currentStatus: { notIn: ['CANCELLED', 'REJECTED'] } },
-        _sum: { totalEur: true },
-      }),
-      prisma.order.aggregate({
-        where: { createdAt: { gte: startOfMonth }, currentStatus: { notIn: ['CANCELLED', 'REJECTED'] } },
-        _sum: { totalEur: true },
-      }),
-      prisma.restaurant.count({ where: { isActive: true } }),
-      prisma.user.count(),
+      supabase.from('orders').select('*', { count: 'exact', head: true }).gte('createdAt', startOfDay.toISOString()),
+      supabase.from('orders').select('*', { count: 'exact', head: true }).gte('createdAt', startOfWeek.toISOString()),
+      supabase.from('orders').select('*', { count: 'exact', head: true }).gte('createdAt', startOfMonth.toISOString()),
+      supabase.from('restaurants').select('*', { count: 'exact', head: true }).eq('isActive', true),
+      supabase.from('users').select('*', { count: 'exact', head: true }),
     ]);
 
+    const ordersToday = ordersTodayRes.count ?? 0;
+    const ordersWeek = ordersWeekRes.count ?? 0;
+    const ordersMonth = ordersMonthRes.count ?? 0;
+    const activeRestaurants = activeRestaurantsRes.count ?? 0;
+    const totalUsers = totalUsersRes.count ?? 0;
+
+    // Get orders by status
+    const { data: allOrders } = await supabase
+      .from('orders')
+      .select('currentStatus');
+
     const statusCounts: Record<string, number> = {};
-    for (const s of ordersByStatus) {
-      statusCounts[s.currentStatus] = s._count.id;
+    if (allOrders) {
+      for (const o of allOrders) {
+        statusCounts[o.currentStatus] = (statusCounts[o.currentStatus] ?? 0) + 1;
+      }
     }
+
+    // Get revenue by time period (exclude CANCELLED and REJECTED)
+    const { data: revenueOrdersToday } = await supabase
+      .from('orders')
+      .select('totalEur')
+      .gte('createdAt', startOfDay.toISOString())
+      .not('currentStatus', 'in', '(CANCELLED,REJECTED)');
+
+    const { data: revenueOrdersWeek } = await supabase
+      .from('orders')
+      .select('totalEur')
+      .gte('createdAt', startOfWeek.toISOString())
+      .not('currentStatus', 'in', '(CANCELLED,REJECTED)');
+
+    const { data: revenueOrdersMonth } = await supabase
+      .from('orders')
+      .select('totalEur')
+      .gte('createdAt', startOfMonth.toISOString())
+      .not('currentStatus', 'in', '(CANCELLED,REJECTED)');
+
+    const sumTotal = (orders: { totalEur: number }[] | null) =>
+      (orders ?? []).reduce((sum, o) => sum + Number(o.totalEur), 0);
 
     return NextResponse.json({
       data: {
@@ -72,9 +88,9 @@ export async function GET() {
           byStatus: statusCounts,
         },
         revenue: {
-          todayEur: Number(revenueToday._sum.totalEur ?? 0),
-          weekEur: Number(revenueWeek._sum.totalEur ?? 0),
-          monthEur: Number(revenueMonth._sum.totalEur ?? 0),
+          todayEur: sumTotal(revenueOrdersToday),
+          weekEur: sumTotal(revenueOrdersWeek),
+          monthEur: sumTotal(revenueOrdersMonth),
         },
         activeRestaurants,
         totalUsers,

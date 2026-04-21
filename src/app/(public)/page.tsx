@@ -1,10 +1,8 @@
 import { Suspense } from 'react';
-import { prisma } from '@/lib/db';
+import { createClient } from '@/lib/supabase/server';
 import RestaurantCard from '@/components/restaurant/RestaurantCard';
 import RestaurantFilters from '@/components/restaurant/RestaurantFilters';
 import type { RestaurantDTO } from '@/types';
-
-export const dynamic = 'force-dynamic';
 
 /**
  * Converts JS getDay() (0=Sunday) to our system (0=Monday, 6=Sunday).
@@ -37,34 +35,38 @@ async function getRestaurants(searchParams: {
   max_delivery_fee?: string;
   max_min_order?: string;
 }): Promise<RestaurantDTO[]> {
-  const where: Record<string, unknown> = { isActive: true };
+  const supabase = await createClient();
+
+  let query = supabase
+    .from('restaurants')
+    .select('*, opening_hours(*)')
+    .eq('isActive', true);
 
   if (searchParams.type) {
-    where.cuisineType = searchParams.type;
+    query = query.eq('cuisineType', searchParams.type);
   }
 
   if (searchParams.max_delivery_fee) {
-    where.deliveryFeeEur = { lte: parseFloat(searchParams.max_delivery_fee) };
+    query = query.lte('deliveryFeeEur', parseFloat(searchParams.max_delivery_fee));
   }
 
   if (searchParams.max_min_order) {
-    where.minOrderEur = { lte: parseFloat(searchParams.max_min_order) };
+    query = query.lte('minOrderEur', parseFloat(searchParams.max_min_order));
   }
 
-  const restaurants = await prisma.restaurant.findMany({
-    where,
-    include: { openingHours: true },
-  });
+  const { data: restaurants } = await query;
+
+  if (!restaurants) return [];
 
   const now = new Date();
 
-  let result: RestaurantDTO[] = restaurants.map((r: typeof restaurants[number]) => ({
+  let result: RestaurantDTO[] = restaurants.map((r) => ({
     id: r.id,
     name: r.name,
     slug: r.slug,
     imageUrl: r.imageUrl,
     cuisineType: r.cuisineType,
-    isOpen: isRestaurantOpen(r.openingHours, now),
+    isOpen: isRestaurantOpen(r.opening_hours ?? [], now),
     deliveryFeeEur: Number(r.deliveryFeeEur),
     minOrderEur: Number(r.minOrderEur),
     deliveryRadiusKm: r.deliveryRadiusKm,

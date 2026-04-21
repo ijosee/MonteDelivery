@@ -22,7 +22,7 @@ export default function PrivacidadPage() {
     // Remove non-essential cookies from browser
     document.cookie.split(';').forEach((c) => {
       const name = c.split('=')[0].trim();
-      if (name && name !== 'next-auth.session-token' && name !== '__Secure-next-auth.session-token') {
+      if (name && !name.startsWith('sb-') && name !== 'pueblo_cookie_consent') {
         document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/`;
       }
     });

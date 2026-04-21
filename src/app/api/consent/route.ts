@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
-import { auth } from '@/lib/auth/auth';
+import { createClient } from '@/lib/supabase/server';
+import { getAuthUser } from '@/lib/auth/session';
 import { z } from 'zod';
 
 const consentSchema = z.object({
@@ -13,9 +13,47 @@ const consentSchema = z.object({
 });
 
 /**
+ * GET /api/consent — Get current user's consent decisions.
+ */
+export async function GET() {
+  try {
+    const authUser = await getAuthUser();
+    if (!authUser) {
+      return NextResponse.json(
+        { success: false, error: 'No autenticado' },
+        { status: 401 }
+      );
+    }
+
+    const supabase = await createClient();
+
+    const { data: consents, error } = await supabase
+      .from('cookie_consents')
+      .select('consentType, decision, createdAt')
+      .eq('userId', authUser.id)
+      .order('createdAt', { ascending: false });
+
+    if (error) {
+      console.error('[API /consent] Error:', error);
+      return NextResponse.json(
+        { success: false, error: 'Error al obtener consentimientos' },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ success: true, data: consents });
+  } catch (error) {
+    console.error('[API /consent] Error:', error);
+    return NextResponse.json(
+      { success: false, error: 'Error al obtener consentimientos' },
+      { status: 500 }
+    );
+  }
+}
+
+/**
  * POST /api/consent — Register cookie consent decisions.
  * Stores each consent type in cookie_consents table.
- * Requisitos: 17.3
  */
 export async function POST(request: NextRequest) {
   try {
@@ -29,24 +67,35 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const session = await auth();
-    const userId = session?.user?.id ?? null;
+    const authUser = await getAuthUser();
+    const userId = authUser?.id ?? null;
     const ipAddress =
       request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? null;
     const userAgent = request.headers.get('user-agent') ?? null;
 
     const { consents } = parsed.data;
 
-    // Create all consent records
-    await prisma.cookieConsent.createMany({
-      data: consents.map((c) => ({
-        userId,
-        consentType: c.consentType as 'NECESSARY' | 'ANALYTICS' | 'MARKETING',
-        decision: c.decision,
-        ipAddress,
-        userAgent,
-      })),
-    });
+    const supabase = await createClient();
+
+    const { error } = await supabase
+      .from('cookie_consents')
+      .insert(
+        consents.map((c) => ({
+          userId,
+          consentType: c.consentType as 'NECESSARY' | 'ANALYTICS' | 'MARKETING',
+          decision: c.decision,
+          ipAddress,
+          userAgent,
+        }))
+      );
+
+    if (error) {
+      console.error('[API /consent] Error:', error);
+      return NextResponse.json(
+        { success: false, error: 'Error al registrar consentimiento' },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

@@ -1,9 +1,7 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@/lib/auth/auth';
-import { prisma } from '@/lib/db';
+import { createClient } from '@/lib/supabase/server';
+import { getAuthUser } from '@/lib/auth/session';
 import { z } from 'zod';
-
-export const dynamic = 'force-dynamic';
 
 const sendCodeSchema = z.object({
   phone: z.string().regex(/^\+34\d{9}$/, {
@@ -18,8 +16,8 @@ const sendCodeSchema = z.object({
  */
 export async function POST(request: Request) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const authUser = await getAuthUser();
+    if (!authUser) {
       return NextResponse.json(
         { data: null, error: 'No autenticado', success: false },
         { status: 401 }
@@ -38,20 +36,23 @@ export async function POST(request: Request) {
 
     const { phone } = parsed.data;
 
-    // Rate limit: check if a code was sent in the last 60 seconds
-    const recentCode = await prisma.phoneVerification.findFirst({
-      where: {
-        userId: session.user.id,
-        phone,
-        createdAt: { gte: new Date(Date.now() - 60_000) },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    const supabase = await createClient();
 
-    if (recentCode) {
-      const secondsLeft = Math.ceil(
-        (recentCode.createdAt.getTime() + 60_000 - Date.now()) / 1000
-      );
+    // Rate limit: check if a code was sent in the last 60 seconds
+    const sixtySecondsAgo = new Date(Date.now() - 60_000).toISOString();
+
+    const { data: recentCodes } = await supabase
+      .from('phone_verifications')
+      .select('createdAt')
+      .eq('userId', authUser.id)
+      .eq('phone', phone)
+      .gte('createdAt', sixtySecondsAgo)
+      .order('createdAt', { ascending: false })
+      .limit(1);
+
+    if (recentCodes && recentCodes.length > 0) {
+      const createdAt = new Date(recentCodes[0].createdAt).getTime();
+      const secondsLeft = Math.ceil((createdAt + 60_000 - Date.now()) / 1000);
       return NextResponse.json(
         {
           data: null,
@@ -66,14 +67,22 @@ export async function POST(request: Request) {
     const code = String(Math.floor(100000 + Math.random() * 900000));
 
     // Store verification record (expires in 10 minutes)
-    await prisma.phoneVerification.create({
-      data: {
-        userId: session.user.id,
+    const { error } = await supabase
+      .from('phone_verifications')
+      .insert({
+        userId: authUser.id,
         phone,
         code,
-        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
-      },
-    });
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+      });
+
+    if (error) {
+      console.error('Error creating phone verification:', error);
+      return NextResponse.json(
+        { data: null, error: 'Error al enviar el código', success: false },
+        { status: 500 }
+      );
+    }
 
     // In development: log to console AND return in response for easy testing
     // In production: integrate with SMS provider (Twilio, etc.)

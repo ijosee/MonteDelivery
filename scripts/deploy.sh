@@ -14,7 +14,7 @@
 #   - Variables de entorno configuradas (ver abajo)
 #
 # Variables de entorno requeridas:
-#   DATABASE_URL — Connection string de la base de datos del entorno destino
+#   NEXT_PUBLIC_SUPABASE_URL — URL del proyecto Supabase del entorno destino
 # ═══════════════════════════════════════════════════════════════════════════════
 
 set -euo pipefail
@@ -115,10 +115,10 @@ log_info "Generando build de producción..."
 pnpm run build
 log_ok "Build completado"
 
-# ─── Paso 5: Migraciones de base de datos (Prisma) ───────────────────────────
+# ─── Paso 5: Migraciones de base de datos (Supabase) ─────────────────────────
 echo ""
-log_info "Aplicando migraciones de Prisma a $ENVIRONMENT..."
-npx prisma migrate deploy
+log_info "Aplicando migraciones de Supabase a $ENVIRONMENT..."
+supabase db push --linked
 log_ok "Migraciones aplicadas"
 
 # ─── Paso 6: Despliegue en Vercel ────────────────────────────────────────────
@@ -142,6 +142,6 @@ echo ""
 echo "Resumen:"
 echo "  • Rama:       $CURRENT_BRANCH"
 echo "  • Entorno:    $ENVIRONMENT"
-echo "  • Prisma:     Migraciones aplicadas"
+echo "  • Supabase:  Migraciones aplicadas"
 echo "  • Vercel:     Desplegado ($VERCEL_ENV)"
 echo ""

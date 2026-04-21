@@ -1,9 +1,7 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@/lib/auth/auth';
-import { prisma } from '@/lib/db';
+import { createClient } from '@/lib/supabase/server';
+import { getAuthUser } from '@/lib/auth/session';
 import { z } from 'zod';
-
-export const dynamic = 'force-dynamic';
 
 const verifyCodeSchema = z.object({
   phone: z.string().regex(/^\+34\d{9}$/, {
@@ -20,8 +18,8 @@ const MAX_ATTEMPTS = 5;
  */
 export async function POST(request: Request) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const authUser = await getAuthUser();
+    if (!authUser) {
       return NextResponse.json(
         { data: null, error: 'No autenticado', success: false },
         { status: 401 }
@@ -40,16 +38,20 @@ export async function POST(request: Request) {
 
     const { phone, code } = parsed.data;
 
+    const supabase = await createClient();
+
     // Find the latest non-expired, non-verified code for this user+phone
-    const verification = await prisma.phoneVerification.findFirst({
-      where: {
-        userId: session.user.id,
-        phone,
-        verified: false,
-        expiresAt: { gte: new Date() },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    const { data: verifications } = await supabase
+      .from('phone_verifications')
+      .select('id, code, attempts, expiresAt')
+      .eq('userId', authUser.id)
+      .eq('phone', phone)
+      .eq('verified', false)
+      .gte('expiresAt', new Date().toISOString())
+      .order('createdAt', { ascending: false })
+      .limit(1);
+
+    const verification = verifications?.[0] ?? null;
 
     if (!verification) {
       return NextResponse.json(
@@ -67,10 +69,10 @@ export async function POST(request: Request) {
     }
 
     // Increment attempts
-    await prisma.phoneVerification.update({
-      where: { id: verification.id },
-      data: { attempts: { increment: 1 } },
-    });
+    await supabase
+      .from('phone_verifications')
+      .update({ attempts: verification.attempts + 1 })
+      .eq('id', verification.id);
 
     // Check code
     if (verification.code !== code) {
@@ -88,10 +90,10 @@ export async function POST(request: Request) {
     }
 
     // Mark as verified
-    await prisma.phoneVerification.update({
-      where: { id: verification.id },
-      data: { verified: true },
-    });
+    await supabase
+      .from('phone_verifications')
+      .update({ verified: true })
+      .eq('id', verification.id);
 
     return NextResponse.json({
       data: { verified: true, phone },

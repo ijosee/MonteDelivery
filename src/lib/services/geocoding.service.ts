@@ -2,7 +2,7 @@
 // GeocodingService — CartoCiudad integration with DB cache
 // Requisitos: 15.1, 15.2, 15.3, 15.4
 
-import { prisma } from '@/lib/db';
+import { createServiceClient } from '@/lib/supabase/service';
 import { ERRORS } from '@/lib/errors';
 
 // ─── Types ───────────────────────────────────────────────────
@@ -30,7 +30,7 @@ const CARTOCIUDAD_BASE =
   'https://www.cartociudad.es/geocoder/api/geocoder';
 
 /** Provincias de Andalucía para filtrar candidatos */
-const ANDALUCIA_PROVINCES = [
+const ANDALUCIA_PROVINCES = new Set([
   'almería',
   'almeria',
   'cádiz',
@@ -44,7 +44,7 @@ const ANDALUCIA_PROVINCES = [
   'málaga',
   'malaga',
   'sevilla',
-];
+]);
 
 // ─── Helpers ─────────────────────────────────────────────────
 
@@ -56,8 +56,8 @@ export function normalizeAddress(address: string): string {
   return address
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '') // Eliminar diacríticos
-    .replace(/\s+/g, ' ')
+    .replaceAll(/[\u0300-\u036f]/g, '') // Eliminar diacríticos
+    .replaceAll(/\s+/g, ' ')
     .trim();
 }
 
@@ -93,8 +93,8 @@ export async function searchCandidates(
   // Filter by Andalucía provinces
   return candidates
     .filter((c) => {
-      const province = (c.province ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-      return ANDALUCIA_PROVINCES.includes(province);
+      const province = (c.province ?? '').toLowerCase().normalize('NFD').replaceAll(/[\u0300-\u036f]/g, '');
+      return ANDALUCIA_PROVINCES.has(province);
     })
     .slice(0, limit);
 }
@@ -111,11 +111,14 @@ export async function searchCandidates(
  */
 export async function geocodeAddress(address: string): Promise<GeocodingResult> {
   const normalized = normalizeAddress(address);
+  const supabase = createServiceClient();
 
   // 1. Check cache
-  const cached = await prisma.geocodingCache.findUnique({
-    where: { normalizedAddress: normalized },
-  });
+  const { data: cached } = await supabase
+    .from('geocoding_cache')
+    .select()
+    .eq('normalizedAddress', normalized)
+    .single();
 
   if (cached) {
     // Validate Andalucía even from cache
@@ -154,15 +157,15 @@ export async function geocodeAddress(address: string): Promise<GeocodingResult> 
   const data = await response.json();
 
   // CartoCiudad `find` returns a single result object
-  if (!data || typeof data.lat === 'undefined' || typeof data.lng === 'undefined') {
+  if (!data || data.lat === undefined || data.lng === undefined) {
     throw Object.assign(new Error(ERRORS.ADDRESS_NOT_FOUND.message), {
       code: ERRORS.ADDRESS_NOT_FOUND.code,
       httpStatus: ERRORS.ADDRESS_NOT_FOUND.httpStatus,
     });
   }
 
-  const lat = parseFloat(data.lat);
-  const lng = parseFloat(data.lng);
+  const lat = Number.parseFloat(data.lat);
+  const lng = Number.parseFloat(data.lng);
   const comunidadAutonoma: string = data.state ?? data.comunidadAutonoma ?? '';
   const municipality: string = data.muni ?? data.municipality ?? '';
   const postalCode: string = data.postalCode ?? data.tip_via ?? '';
@@ -170,15 +173,13 @@ export async function geocodeAddress(address: string): Promise<GeocodingResult> 
   // 3. Validate Andalucía
   if (comunidadAutonoma !== 'Andalucía') {
     // Still cache the result to avoid repeated API calls
-    await prisma.geocodingCache.create({
-      data: {
-        normalizedAddress: normalized,
-        lat,
-        lng,
-        comunidadAutonoma: comunidadAutonoma || null,
-        municipality: municipality || null,
-        postalCode: postalCode || null,
-      },
+    await supabase.from('geocoding_cache').insert({
+      normalizedAddress: normalized,
+      lat,
+      lng,
+      comunidadAutonoma: comunidadAutonoma || null,
+      municipality: municipality || null,
+      postalCode: postalCode || null,
     });
 
     throw Object.assign(new Error(ERRORS.OUTSIDE_SERVICE_AREA.message), {
@@ -188,15 +189,13 @@ export async function geocodeAddress(address: string): Promise<GeocodingResult> 
   }
 
   // 4. Store in cache
-  await prisma.geocodingCache.create({
-    data: {
-      normalizedAddress: normalized,
-      lat,
-      lng,
-      comunidadAutonoma,
-      municipality: municipality || null,
-      postalCode: postalCode || null,
-    },
+  await supabase.from('geocoding_cache').insert({
+    normalizedAddress: normalized,
+    lat,
+    lng,
+    comunidadAutonoma,
+    municipality: municipality || null,
+    postalCode: postalCode || null,
   });
 
   return {

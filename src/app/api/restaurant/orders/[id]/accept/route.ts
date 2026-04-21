@@ -1,15 +1,11 @@
-import { type NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/lib/auth/auth';
-import { prisma } from '@/lib/db';
-import { validateTransition } from '@/lib/domain/order-fsm';
-import { computeEta } from '@/lib/domain/eta-calculator';
-import { distanceKm } from '@/lib/domain/haversine';
-import { logAudit } from '@/lib/services/audit.service';
-import { requirePermission } from '@/lib/auth/rbac';
-import type { UserRole } from '@/generated/prisma/client';
-import type { PrismaClient } from '@/generated/prisma/client';
-
-export const dynamic = 'force-dynamic';
+import { type NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { getAuthUserWithRole } from "@/lib/auth/session";
+import { validateTransition } from "@/lib/domain/order-fsm";
+import { computeEta } from "@/lib/domain/eta-calculator";
+import { distanceKm } from "@/lib/domain/haversine";
+import { logAudit } from "@/lib/services/audit.service";
+import { requirePermission } from "@/lib/auth/rbac";
 
 /**
  * POST /api/restaurant/orders/[id]/accept — PLACED → ACCEPTED
@@ -19,52 +15,65 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const authUser = await getAuthUserWithRole();
+    if (!authUser) {
       return NextResponse.json(
-        { data: null, error: 'No autenticado', success: false },
+        { data: null, error: "No autenticado", success: false },
         { status: 401 }
       );
     }
 
-    requirePermission(session.user.role as UserRole, 'orders:accept_reject');
+    requirePermission(authUser.role, "orders:accept_reject");
 
     const { id } = await params;
 
-    // Verify user belongs to the restaurant that owns this order
-    const order = await prisma.order.findUnique({
-      where: { id },
-      include: {
-        restaurant: { select: { id: true, lat: true, lng: true } },
-        address: { select: { lat: true, lng: true } },
-        items: { select: { quantity: true } },
-      },
-    });
+    const supabase = await createClient();
 
-    if (!order) {
+    // Fetch the order with restaurant, address, and items
+    const { data: order, error: orderError } = await supabase
+      .from("orders")
+      .select(
+        "id, orderNumber, currentStatus, fulfillmentType, scheduledFor, restaurantId, restaurants(id, lat, lng), addresses(lat, lng), order_items(quantity)"
+      )
+      .eq("id", id)
+      .single();
+
+    if (orderError || !order) {
+      if (orderError?.code === "PGRST116" || !order) {
+        return NextResponse.json(
+          { data: null, error: "Pedido no encontrado", success: false },
+          { status: 404 }
+        );
+      }
+      console.error("Error fetching order:", orderError);
       return NextResponse.json(
-        { data: null, error: 'Pedido no encontrado', success: false },
-        { status: 404 }
+        { data: null, error: "Error al aceptar el pedido", success: false },
+        { status: 500 }
       );
     }
 
-    const ru = await prisma.restaurantUser.findFirst({
-      where: { userId: session.user.id, restaurantId: order.restaurantId },
-    });
+    // Verify user belongs to the restaurant that owns this order
+    const { data: ru } = await supabase
+      .from("restaurant_users")
+      .select("restaurantId")
+      .eq("userId", authUser.id)
+      .eq("restaurantId", order.restaurantId)
+      .limit(1)
+      .single();
 
     if (!ru) {
       return NextResponse.json(
-        { data: null, error: 'No tienes permisos para este pedido', success: false },
+        { data: null, error: "No tienes permisos para este pedido", success: false },
         { status: 403 }
       );
     }
 
     const result = validateTransition({
       currentStatus: order.currentStatus,
-      targetStatus: 'ACCEPTED',
-      userRole: session.user.role as 'RESTAURANT_OWNER' | 'RESTAURANT_STAFF',
+      targetStatus: "ACCEPTED",
+      userRole: authUser.role as "RESTAURANT_OWNER" | "RESTAURANT_STAFF",
       fulfillmentType: order.fulfillmentType,
-      scheduledFor: order.scheduledFor,
+      scheduledFor: order.scheduledFor ? new Date(order.scheduledFor) : null,
     });
 
     if (!result.success) {
@@ -75,60 +84,91 @@ export async function POST(
     }
 
     // Recalculate ETA
-    const totalItems = order.items.reduce((s: number, i: typeof order.items[number]) => s + i.quantity, 0);
-    const dist = distanceKm(order.address.lat, order.address.lng, order.restaurant.lat, order.restaurant.lng);
-    const activeCount = await prisma.order.count({
-      where: {
-        restaurantId: order.restaurantId,
-        currentStatus: { in: ['PLACED', 'ACCEPTED', 'PREPARING', 'READY_FOR_PICKUP', 'OUT_FOR_DELIVERY'] },
-      },
-    });
+    const restaurant = order.restaurants as unknown as { id: string; lat: number; lng: number };
+    const address = order.addresses as unknown as { lat: number; lng: number };
+    const items = order.order_items as unknown as { quantity: number }[];
+
+    const totalItems = items.reduce((s: number, i) => s + i.quantity, 0);
+    const dist = distanceKm(address.lat, address.lng, restaurant.lat, restaurant.lng);
+
+    const { count: activeCount } = await supabase
+      .from("orders")
+      .select("*", { count: "exact", head: true })
+      .eq("restaurantId", order.restaurantId)
+      .in("currentStatus", [
+        "PLACED",
+        "ACCEPTED",
+        "PREPARING",
+        "READY_FOR_PICKUP",
+        "OUT_FOR_DELIVERY",
+      ]);
+
     const etaResult = computeEta({
       fulfillmentType: order.fulfillmentType,
       itemCount: totalItems,
       distanceKm: dist,
-      activeOrderCount: activeCount,
-      scheduledFor: order.scheduledFor,
+      activeOrderCount: activeCount ?? 0,
+      scheduledFor: order.scheduledFor ? new Date(order.scheduledFor) : null,
     });
 
-    const updated = await prisma.$transaction(async (tx: Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$use' | '$extends'>) => {
-      const u = await tx.order.update({
-        where: { id },
-        data: {
-          currentStatus: 'ACCEPTED',
-          eta: etaResult.eta,
-          etaWindowEnd: etaResult.etaWindowEnd ?? null,
-        },
+    // Update order status
+    const { data: updated, error: updateError } = await supabase
+      .from("orders")
+      .update({
+        currentStatus: "ACCEPTED",
+        eta: etaResult.eta.toISOString(),
+        etaWindowEnd: etaResult.etaWindowEnd?.toISOString() ?? null,
+      })
+      .eq("id", id)
+      .select("id, orderNumber, currentStatus")
+      .single();
+
+    if (updateError || !updated) {
+      console.error("Error updating order:", updateError);
+      return NextResponse.json(
+        { data: null, error: "Error al aceptar el pedido", success: false },
+        { status: 500 }
+      );
+    }
+
+    // Insert status history
+    const { error: historyError } = await supabase
+      .from("order_status_history")
+      .insert({
+        orderId: id,
+        fromStatus: order.currentStatus,
+        toStatus: "ACCEPTED",
+        changedByUserId: authUser.id,
       });
 
-      await tx.orderStatusHistory.create({
-        data: {
-          orderId: id,
-          fromStatus: order.currentStatus,
-          toStatus: 'ACCEPTED',
-          changedByUserId: session.user!.id!,
-        },
-      });
+    if (historyError) {
+      console.error("Error inserting status history:", historyError);
+    }
 
-      return u;
-    });
-
+    // Audit log (fire-and-forget)
     logAudit({
-      userId: session.user.id,
-      action: 'ORDER_ACCEPTED',
-      resourceType: 'order',
+      userId: authUser.id,
+      action: "ORDER_ACCEPTED",
+      resourceType: "order",
       resourceId: id,
       details: { orderNumber: order.orderNumber },
     }).catch(() => {});
 
     return NextResponse.json({
-      data: { id: updated.id, orderNumber: updated.orderNumber, status: updated.currentStatus },
+      data: {
+        id: updated.id,
+        orderNumber: updated.orderNumber,
+        status: updated.currentStatus,
+      },
       error: null,
       success: true,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Error al aceptar el pedido';
-    const status = message.includes('permisos') ? 403 : 500;
-    return NextResponse.json({ data: null, error: message, success: false }, { status });
+    const message = error instanceof Error ? error.message : "Error al aceptar el pedido";
+    const status = message.includes("permisos") ? 403 : 500;
+    return NextResponse.json(
+      { data: null, error: message, success: false },
+      { status }
+    );
   }
 }

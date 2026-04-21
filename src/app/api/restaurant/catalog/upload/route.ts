@@ -1,10 +1,7 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@/lib/auth/auth';
+import { getAuthUserWithRole } from '@/lib/auth/session';
 import { requirePermission } from '@/lib/auth/rbac';
 import { upload } from '@/lib/services/storage.service';
-import type { UserRole } from '@/generated/prisma/client';
-
-export const dynamic = 'force-dynamic';
 
 /**
  * POST /api/restaurant/catalog/upload — Upload a product image.
@@ -12,12 +9,12 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(request: Request) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const authUser = await getAuthUserWithRole();
+    if (!authUser) {
       return NextResponse.json({ data: null, error: 'No autenticado', success: false }, { status: 401 });
     }
 
-    requirePermission(session.user.role as UserRole, 'products:crud');
+    requirePermission(authUser.role, 'products:crud');
 
     const formData = await request.formData();
     const file = formData.get('file') as File | null;

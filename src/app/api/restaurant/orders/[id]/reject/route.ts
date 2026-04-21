@@ -1,13 +1,9 @@
-import { type NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/lib/auth/auth';
-import { prisma } from '@/lib/db';
-import { validateTransition } from '@/lib/domain/order-fsm';
-import { logAudit } from '@/lib/services/audit.service';
-import { requirePermission } from '@/lib/auth/rbac';
-import type { UserRole } from '@/generated/prisma/client';
-import type { PrismaClient } from '@/generated/prisma/client';
-
-export const dynamic = 'force-dynamic';
+import { type NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { getAuthUserWithRole } from "@/lib/auth/session";
+import { validateTransition } from "@/lib/domain/order-fsm";
+import { logAudit } from "@/lib/services/audit.service";
+import { requirePermission } from "@/lib/auth/rbac";
 
 /**
  * POST /api/restaurant/orders/[id]/reject — PLACED → REJECTED
@@ -18,56 +14,74 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const authUser = await getAuthUserWithRole();
+    if (!authUser) {
       return NextResponse.json(
-        { data: null, error: 'No autenticado', success: false },
+        { data: null, error: "No autenticado", success: false },
         { status: 401 }
       );
     }
 
-    requirePermission(session.user.role as UserRole, 'orders:accept_reject');
+    requirePermission(authUser.role, "orders:accept_reject");
 
     const { id } = await params;
     const body = await request.json();
-    const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
+    const reason = typeof body.reason === "string" ? body.reason.trim() : "";
 
     if (!reason) {
       return NextResponse.json(
-        { data: null, error: 'El motivo de rechazo es obligatorio', success: false },
+        { data: null, error: "El motivo de rechazo es obligatorio", success: false },
         { status: 422 }
       );
     }
 
-    const order = await prisma.order.findUnique({
-      where: { id },
-      select: { id: true, currentStatus: true, fulfillmentType: true, scheduledFor: true, restaurantId: true, orderNumber: true },
-    });
+    const supabase = await createClient();
 
-    if (!order) {
+    // Fetch the order
+    const { data: order, error: orderError } = await supabase
+      .from("orders")
+      .select(
+        "id, currentStatus, fulfillmentType, scheduledFor, restaurantId, orderNumber"
+      )
+      .eq("id", id)
+      .single();
+
+    if (orderError || !order) {
+      if (orderError?.code === "PGRST116" || !order) {
+        return NextResponse.json(
+          { data: null, error: "Pedido no encontrado", success: false },
+          { status: 404 }
+        );
+      }
+      console.error("Error fetching order:", orderError);
       return NextResponse.json(
-        { data: null, error: 'Pedido no encontrado', success: false },
-        { status: 404 }
+        { data: null, error: "Error al rechazar el pedido", success: false },
+        { status: 500 }
       );
     }
 
-    const ru = await prisma.restaurantUser.findFirst({
-      where: { userId: session.user.id, restaurantId: order.restaurantId },
-    });
+    // Verify user belongs to the restaurant
+    const { data: ru } = await supabase
+      .from("restaurant_users")
+      .select("restaurantId")
+      .eq("userId", authUser.id)
+      .eq("restaurantId", order.restaurantId)
+      .limit(1)
+      .single();
 
     if (!ru) {
       return NextResponse.json(
-        { data: null, error: 'No tienes permisos para este pedido', success: false },
+        { data: null, error: "No tienes permisos para este pedido", success: false },
         { status: 403 }
       );
     }
 
     const result = validateTransition({
       currentStatus: order.currentStatus,
-      targetStatus: 'REJECTED',
-      userRole: session.user.role as 'RESTAURANT_OWNER' | 'RESTAURANT_STAFF',
+      targetStatus: "REJECTED",
+      userRole: authUser.role as "RESTAURANT_OWNER" | "RESTAURANT_STAFF",
       fulfillmentType: order.fulfillmentType,
-      scheduledFor: order.scheduledFor,
+      scheduledFor: order.scheduledFor ? new Date(order.scheduledFor) : null,
     });
 
     if (!result.success) {
@@ -77,41 +91,61 @@ export async function POST(
       );
     }
 
-    const updated = await prisma.$transaction(async (tx: Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$use' | '$extends'>) => {
-      const u = await tx.order.update({
-        where: { id },
-        data: { currentStatus: 'REJECTED' },
+    // Update order status
+    const { data: updated, error: updateError } = await supabase
+      .from("orders")
+      .update({ currentStatus: "REJECTED" })
+      .eq("id", id)
+      .select("id, orderNumber, currentStatus")
+      .single();
+
+    if (updateError || !updated) {
+      console.error("Error updating order:", updateError);
+      return NextResponse.json(
+        { data: null, error: "Error al rechazar el pedido", success: false },
+        { status: 500 }
+      );
+    }
+
+    // Insert status history
+    const { error: historyError } = await supabase
+      .from("order_status_history")
+      .insert({
+        orderId: id,
+        fromStatus: order.currentStatus,
+        toStatus: "REJECTED",
+        changedByUserId: authUser.id,
+        reason,
       });
 
-      await tx.orderStatusHistory.create({
-        data: {
-          orderId: id,
-          fromStatus: order.currentStatus,
-          toStatus: 'REJECTED',
-          changedByUserId: session.user!.id!,
-          reason,
-        },
-      });
+    if (historyError) {
+      console.error("Error inserting status history:", historyError);
+    }
 
-      return u;
-    });
-
+    // Audit log (fire-and-forget)
     logAudit({
-      userId: session.user.id,
-      action: 'ORDER_REJECTED',
-      resourceType: 'order',
+      userId: authUser.id,
+      action: "ORDER_REJECTED",
+      resourceType: "order",
       resourceId: id,
       details: { orderNumber: order.orderNumber, reason },
     }).catch(() => {});
 
     return NextResponse.json({
-      data: { id: updated.id, orderNumber: updated.orderNumber, status: updated.currentStatus },
+      data: {
+        id: updated.id,
+        orderNumber: updated.orderNumber,
+        status: updated.currentStatus,
+      },
       error: null,
       success: true,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Error al rechazar el pedido';
-    const status = message.includes('permisos') ? 403 : 500;
-    return NextResponse.json({ data: null, error: message, success: false }, { status });
+    const message = error instanceof Error ? error.message : "Error al rechazar el pedido";
+    const status = message.includes("permisos") ? 403 : 500;
+    return NextResponse.json(
+      { data: null, error: message, success: false },
+      { status }
+    );
   }
 }

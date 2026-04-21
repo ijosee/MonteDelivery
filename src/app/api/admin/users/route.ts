@@ -1,21 +1,19 @@
 import { type NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/lib/auth/auth';
-import { prisma } from '@/lib/db';
+import { createClient } from '@/lib/supabase/server';
+import { getAuthUserWithRole } from '@/lib/auth/session';
 import { requirePermission } from '@/lib/auth/rbac';
-import type { UserRole } from '@/generated/prisma/client';
-
-export const dynamic = 'force-dynamic';
+import type { UserRole } from '@/types/database';
 
 /**
  * GET /api/admin/users — List all users.
  */
 export async function GET(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const authUser = await getAuthUserWithRole();
+    if (!authUser) {
       return NextResponse.json({ data: null, error: 'No autenticado', success: false }, { status: 401 });
     }
-    requirePermission(session.user.role as UserRole, 'users:manage');
+    requirePermission(authUser.role as UserRole, 'users:manage');
 
     const { searchParams } = new URL(request.url);
     const page = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10));
@@ -23,38 +21,54 @@ export async function GET(request: NextRequest) {
     const skip = (page - 1) * limit;
     const role = searchParams.get('role');
 
-    const where: Record<string, unknown> = {};
-    if (role) where.role = role;
+    const supabase = await createClient();
 
-    const [users, total] = await Promise.all([
-      prisma.user.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        skip,
-        take: limit,
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          role: true,
-          emailVerified: true,
-          createdAt: true,
-          _count: { select: { orders: true } },
-        },
-      }),
-      prisma.user.count({ where }),
-    ]);
+    let query = supabase
+      .from('users')
+      .select('id, name, email, role, emailVerified, createdAt', { count: 'exact' });
+
+    if (role) {
+      query = query.eq('role', role as UserRole);
+    }
+
+    const { data: users, count, error } = await query
+      .order('createdAt', { ascending: false })
+      .range(skip, skip + limit - 1);
+
+    if (error) {
+      console.error('Error fetching users:', error);
+      return NextResponse.json({ data: null, error: 'Error interno del servidor', success: false }, { status: 500 });
+    }
+
+    const total = count ?? 0;
+
+    // Get order counts for each user
+    const userIds = (users ?? []).map((u) => u.id);
+    const orderCounts: Record<string, number> = {};
+
+    if (userIds.length > 0) {
+      const { data: orders } = await supabase
+        .from('orders')
+        .select('userId')
+        .in('userId', userIds);
+
+      if (orders) {
+        for (const o of orders) {
+          orderCounts[o.userId] = (orderCounts[o.userId] ?? 0) + 1;
+        }
+      }
+    }
 
     return NextResponse.json({
       data: {
-        users: users.map((u: typeof users[number]) => ({
+        users: (users ?? []).map((u) => ({
           id: u.id,
           name: u.name,
           email: u.email,
           role: u.role,
           emailVerified: !!u.emailVerified,
-          orderCount: u._count.orders,
-          createdAt: u.createdAt.toISOString(),
+          orderCount: orderCounts[u.id] ?? 0,
+          createdAt: u.createdAt,
         })),
         pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
       },

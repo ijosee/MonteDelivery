@@ -1,0 +1,347 @@
+# Plan de Implementación: Migración de Prisma a Supabase
+
+## Visión General
+
+Migración incremental de monte-delivery desde Prisma ORM + NextAuth hacia Supabase Client + Supabase Auth. Cada tarea construye sobre las anteriores, empezando por la infraestructura base (dependencias, clientes, tipos) y avanzando hacia autenticación, acceso a datos, servicios internos, y limpieza final. Las rutas API se agrupan por dominio para mantener el proyecto compilable en cada paso.
+
+## Tareas
+
+- [x] 1. Configurar dependencias y variables de entorno
+  - [x] 1.1 Añadir dependencias de Supabase y eliminar dependencias de Prisma/NextAuth
+    - Ejecutar `pnpm add @supabase/supabase-js @supabase/ssr` y `pnpm add -D supabase`
+    - Eliminar `prisma`, `@prisma/client`, `@prisma/adapter-pg`, `@auth/prisma-adapter`, `next-auth`, `bcryptjs` de `package.json`
+    - Eliminar la sección `"prisma"` de `package.json`
+    - Añadir script `"gen:types": "supabase gen types typescript --project-id $SUPABASE_PROJECT_REF > src/types/database.ts"` en `package.json`
+    - Actualizar script `"prisma:seed"` a `"seed": "tsx scripts/seed.ts"`
+    - _Requisitos: 14.1, 14.2, 14.3, 14.4_
+  - [x] 1.2 Configurar variables de entorno
+    - Añadir `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` y `SUPABASE_SERVICE_ROLE_KEY` a `.env.example` con comentarios descriptivos
+    - Eliminar `DATABASE_URL`, `NEXTAUTH_URL`, `NEXTAUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` de `.env.example`
+    - _Requisitos: 15.1, 15.2, 15.3, 15.4_
+
+- [x] 2. Crear utilidades de cliente Supabase y tipos generados
+  - [x] 2.1 Crear cliente de servidor (`src/lib/supabase/server.ts`)
+    - Implementar `createClient()` usando `createServerClient` de `@supabase/ssr` con cookies de `next/headers`
+    - Seguir el patrón exacto descrito en el diseño
+    - _Requisitos: 1.1_
+  - [x] 2.2 Crear cliente de navegador (`src/lib/supabase/client.ts`)
+    - Implementar `createClient()` usando `createBrowserClient` de `@supabase/ssr`
+    - _Requisitos: 1.2_
+  - [x] 2.3 Crear utilidad de middleware (`src/lib/supabase/middleware.ts`)
+    - Implementar `updateSession()` que refresca la sesión de Supabase Auth en cada request
+    - Incluir lógica de redirección a login para rutas protegidas cuando no hay usuario
+    - _Requisitos: 1.1, 7.1_
+  - [x] 2.4 Crear cliente Service Role (`src/lib/supabase/service.ts`)
+    - Implementar `createServiceClient()` usando `createClient` de `@supabase/supabase-js` con `SUPABASE_SERVICE_ROLE_KEY`
+    - _Requisitos: 1.3_
+  - [x] 2.5 Generar tipos TypeScript desde esquema Supabase (`src/types/database.ts`)
+    - Ejecutar `supabase gen types typescript` y guardar en `src/types/database.ts`
+    - Verificar que incluye las 22 tablas y 5 enums del esquema
+    - Exportar tipos auxiliares: `UserRole`, `OrderStatus`, `FulfillmentType`, `RestaurantUserRole`, `ConsentType`
+    - _Requisitos: 2.1, 2.2, 2.3, 2.5_
+
+- [x] 3. Migrar sistema RBAC y helpers de sesión
+  - [x] 3.1 Actualizar tipos en `src/lib/auth/rbac.ts`
+    - Cambiar `import { UserRole } from '@/generated/prisma/client'` por `import type { UserRole } from '@/types/database'`
+    - Mantener intacta la estructura de `ROLE_PERMISSIONS`, `hasPermission` y `requirePermission`
+    - _Requisitos: 11.1, 11.2_
+  - [x] 3.2 Crear helper de autenticación (`src/lib/auth/session.ts`)
+    - Implementar `getAuthUser()` que obtiene el usuario autenticado vía `supabase.auth.getUser()`
+    - Implementar `getAuthUserWithRole()` que además consulta el rol desde la tabla `users`
+    - Definir interfaces `AuthUser` y `AuthUserWithRole`
+    - _Requisitos: 11.3, 7.4_
+  - [ ]* 3.3 Escribir test de propiedad para consistencia RBAC
+    - **Propiedad 1: Consistencia del mapa de permisos RBAC**
+    - Verificar que para cualquier combinación de rol y permiso, `hasPermission()` con tipos de Supabase devuelve el mismo resultado esperado
+    - **Valida: Requisito 11.2**
+
+- [x] 4. Punto de control — Verificar infraestructura base
+  - Asegurar que los clientes Supabase se crean correctamente, los tipos se generan sin errores y el RBAC compila con los nuevos tipos. Preguntar al usuario si surgen dudas.
+
+- [x] 5. Migrar autenticación — Registro, Login, Logout y Recuperación de contraseña
+  - [x] 5.1 Migrar ruta de registro (`src/app/api/auth/register/route.ts`)
+    - Reemplazar `prisma.user.create()` + `bcryptjs.hash()` por `supabase.auth.signUp()` + inserción en tabla `users`
+    - Manejar error 409 para email duplicado, error 500 para fallos de Supabase Auth
+    - Eliminar importación de `bcryptjs` y `prisma`
+    - _Requisitos: 3.1, 3.2, 3.3, 3.4, 3.5_
+  - [x] 5.2 Crear ruta de login (`src/app/api/auth/login/route.ts`)
+    - Implementar login con `supabase.auth.signInWithPassword()`
+    - Devolver error genérico sin revelar si el email existe
+    - Eliminar lógica manual de bloqueo por intentos fallidos (delegar a Supabase Auth)
+    - _Requisitos: 4.1, 4.2, 4.3, 4.4_
+  - [x] 5.3 Crear ruta de logout (`src/app/api/auth/logout/route.ts`)
+    - Implementar logout con `supabase.auth.signOut()`
+    - Limpiar cookies de sesión y redirigir a login
+    - _Requisitos: 5.1, 5.2, 5.3_
+  - [x] 5.4 Migrar ruta de recuperación de contraseña (`src/app/api/auth/forgot-password/route.ts`)
+    - Reemplazar lógica manual con tokens por `supabase.auth.resetPasswordForEmail()`
+    - _Requisitos: 6.1_
+  - [x] 5.5 Migrar ruta de reset de contraseña (`src/app/api/auth/reset-password/route.ts`)
+    - Reemplazar lógica manual por `supabase.auth.updateUser({ password })` usando el token de la URL
+    - _Requisitos: 6.2, 6.3_
+  - [x] 5.6 Crear ruta de callback de autenticación (`src/app/api/auth/callback/route.ts`)
+    - Implementar el callback para intercambiar el código de autorización por sesión (necesario para flujos de reset password)
+    - _Requisitos: 6.2_
+
+- [x] 6. Migrar middleware de autenticación
+  - [x] 6.1 Actualizar `src/middleware.ts` para usar Supabase Auth
+    - Reemplazar cualquier referencia residual a NextAuth por `supabase.auth.getUser()`
+    - Verificar que `updateSession()` de `@/lib/supabase/middleware` se invoca correctamente
+    - Mantener la protección RBAC por rutas: `/admin/*` solo ADMIN, `/panel/*` solo RESTAURANT_OWNER y RESTAURANT_STAFF
+    - Mantener headers de seguridad (X-Frame-Options, X-Content-Type-Options, Referrer-Policy)
+    - _Requisitos: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6_
+  - [ ]* 6.2 Escribir test de propiedad para control de acceso por ruta
+    - **Propiedad 2: Control de acceso por ruta del middleware**
+    - Verificar que para cualquier combinación de rol y ruta protegida, el acceso se concede si y solo si el rol tiene permiso
+    - **Valida: Requisitos 7.3, 7.6**
+
+- [x] 7. Punto de control — Verificar autenticación completa
+  - Asegurar que registro, login, logout, reset password y middleware funcionan correctamente con Supabase Auth. Todos los tests deben pasar. Preguntar al usuario si surgen dudas.
+
+- [x] 8. Migrar rutas API — Dominio Restaurantes (lectura pública)
+  - [x] 8.1 Migrar `src/app/api/restaurants/route.ts`
+    - Reemplazar `prisma.restaurant.findMany()` por `supabase.from('restaurants').select()`
+    - Traducir filtros, ordenamiento y paginación a sintaxis Supabase
+    - Reemplazar `auth()` por `getAuthUser()` si la ruta requiere autenticación
+    - _Requisitos: 8.1, 8.4, 8.5_
+  - [x] 8.2 Migrar `src/app/api/restaurants/[slug]/route.ts`
+    - Reemplazar `prisma.restaurant.findUnique()` con `include` por `supabase.from('restaurants').select('*, opening_hours(*), ...').eq('slug', slug).single()`
+    - _Requisitos: 8.2, 8.3_
+  - [x] 8.3 Migrar `src/app/api/restaurants/nearby/route.ts`
+    - Reemplazar consulta Prisma por `supabase.from('restaurants').select()` con filtros
+    - Mantener la lógica de dominio `distanceKm()` (haversine) sin cambios
+    - _Requisitos: 8.1, 8.5_
+  - [x] 8.4 Migrar `src/app/api/restaurants/[slug]/available-slots/route.ts`
+    - Reemplazar consulta Prisma por Supabase para obtener horarios de apertura
+    - Mantener la lógica de dominio `getAvailableSlots()` sin cambios
+    - _Requisitos: 8.1_
+
+- [x] 9. Migrar rutas API — Dominio Carrito
+  - [x] 9.1 Migrar `src/app/api/cart/route.ts` (GET, DELETE)
+    - Reemplazar `prisma.cart.findUnique()` por `supabase.from('carts').select('*, cart_items(*, products(*))').eq('user_id', userId).single()`
+    - Reemplazar `prisma.cartItem.deleteMany()` por `supabase.from('cart_items').delete().eq('cart_id', cartId)`
+    - Reemplazar `auth()` por `getAuthUser()`
+    - _Requisitos: 8.1, 9.3_
+  - [x] 9.2 Migrar `src/app/api/cart/items/route.ts` (POST)
+    - Reemplazar `prisma.cart.upsert()` y `prisma.cartItem.create()` por operaciones Supabase equivalentes
+    - _Requisitos: 9.1_
+  - [x] 9.3 Migrar `src/app/api/cart/items/[itemId]/route.ts` (PATCH, DELETE)
+    - Reemplazar `prisma.cartItem.update()` y `prisma.cartItem.delete()` por Supabase
+    - _Requisitos: 9.2, 9.3_
+
+- [x] 10. Migrar rutas API — Dominio Pedidos
+  - [x] 10.1 Crear función RPC para transacción de pedido
+    - Crear migración SQL `supabase/migrations/xxx_create_order_transaction.sql` con la función `create_order_transaction()` según el diseño
+    - La función debe crear el pedido, items, historial de estado y limpiar el carrito atómicamente
+    - _Requisitos: 9.4_
+  - [x] 10.2 Migrar `src/app/api/orders/route.ts` (GET, POST)
+    - GET: Reemplazar `prisma.order.findMany()` por `supabase.from('orders').select()` con paginación
+    - POST: Reemplazar `prisma.$transaction()` por `supabase.rpc('create_order_transaction', params)`
+    - Reemplazar `auth()` por `getAuthUser()`
+    - _Requisitos: 8.1, 8.4, 9.1, 9.4, 9.5_
+  - [x] 10.3 Migrar `src/app/api/orders/[id]/route.ts` (GET)
+    - Reemplazar `prisma.order.findUnique()` con `include` por `supabase.from('orders').select('*, order_items(*), order_status_history(*)').eq('id', id).single()`
+    - _Requisitos: 8.2, 8.3_
+  - [x] 10.4 Migrar `src/app/api/orders/[id]/cancel/route.ts` (POST)
+    - Reemplazar `prisma.$transaction()` por operaciones Supabase secuenciales con manejo de errores
+    - Mantener la lógica de dominio `validateTransition()` (FSM) sin cambios
+    - Eliminar importación de `PrismaClient`
+    - _Requisitos: 9.2, 9.4_
+  - [x] 10.5 Migrar `src/app/api/orders/[id]/confirm/route.ts` (POST)
+    - Reemplazar consultas Prisma por Supabase
+    - _Requisitos: 9.1, 9.5_
+
+- [x] 11. Migrar rutas API — Dominio Direcciones
+  - [x] 11.1 Migrar `src/app/api/addresses/route.ts` (GET, POST)
+    - Reemplazar `prisma.address.findMany()` y `prisma.address.create()` por Supabase
+    - Mantener la integración con `geocodeAddress()` sin cambios
+    - _Requisitos: 8.1, 9.1_
+  - [x] 11.2 Migrar `src/app/api/addresses/[id]/route.ts` (PATCH, DELETE)
+    - Reemplazar `prisma.address.update()` y `prisma.address.delete()` por Supabase
+    - _Requisitos: 9.2, 9.3_
+
+- [x] 12. Punto de control — Verificar rutas de cliente
+  - Asegurar que las rutas de restaurantes, carrito, pedidos y direcciones funcionan correctamente. Todos los tests deben pasar. Preguntar al usuario si surgen dudas.
+
+- [x] 13. Migrar rutas API — Panel de Restaurante
+  - [x] 13.1 Migrar `src/app/api/restaurant/catalog/route.ts` (GET)
+    - Reemplazar `prisma.category.findMany()` con `include` por `supabase.from('categories').select('*, products(*)').eq('restaurant_id', restaurantId)`
+    - Reemplazar `auth()` por `getAuthUserWithRole()`, actualizar importación de `UserRole`
+    - _Requisitos: 8.1, 8.3_
+  - [x] 13.2 Migrar `src/app/api/restaurant/catalog/categories/route.ts` y `[id]/route.ts`
+    - Reemplazar operaciones CRUD de categorías de Prisma a Supabase
+    - Actualizar importaciones de `UserRole` a `@/types/database`
+    - _Requisitos: 9.1, 9.2, 9.3_
+  - [x] 13.3 Migrar `src/app/api/restaurant/catalog/products/route.ts` y `[id]/route.ts`
+    - Reemplazar operaciones CRUD de productos de Prisma a Supabase
+    - Eliminar importaciones de `PrismaClient`, actualizar `UserRole`
+    - _Requisitos: 9.1, 9.2, 9.3, 9.5_
+  - [x] 13.4 Migrar `src/app/api/restaurant/orders/route.ts` (GET)
+    - Reemplazar `prisma.order.findMany()` por `supabase.from('orders').select()` con filtros por restaurante
+    - _Requisitos: 8.1, 8.4_
+  - [x] 13.5 Migrar `src/app/api/restaurant/orders/[id]/accept/route.ts` (POST)
+    - Reemplazar `prisma.$transaction()` por operaciones Supabase secuenciales
+    - Mantener `validateTransition()` y `computeEta()` sin cambios
+    - Eliminar importación de `PrismaClient`, actualizar `UserRole`
+    - _Requisitos: 9.2, 9.4_
+  - [x] 13.6 Migrar `src/app/api/restaurant/orders/[id]/reject/route.ts` (POST)
+    - Reemplazar `prisma.$transaction()` por operaciones Supabase secuenciales
+    - Eliminar importación de `PrismaClient`, actualizar `UserRole`
+    - _Requisitos: 9.2, 9.4_
+  - [x] 13.7 Migrar `src/app/api/restaurant/orders/[id]/status/route.ts` (PATCH)
+    - Reemplazar `prisma.$transaction()` por operaciones Supabase secuenciales
+    - Mantener `validateTransition()` y `computeEta()` sin cambios
+    - Eliminar importaciones de `PrismaClient`, `OrderStatus`, actualizar a tipos de `@/types/database`
+    - _Requisitos: 9.2, 9.4_
+  - [x] 13.8 Migrar `src/app/api/restaurant/staff/route.ts` (GET)
+    - Reemplazar `prisma.restaurantUser.findMany()` por `supabase.from('restaurant_users').select('*, users(*)')`
+    - _Requisitos: 8.1, 8.3_
+  - [x] 13.9 Migrar `src/app/api/restaurant/staff/invite/route.ts` (POST)
+    - Reemplazar creación de usuario con Prisma + bcryptjs por `supabase.auth.admin.createUser()` + inserción en `users` y `restaurant_users`
+    - Usar cliente Service Role para operaciones admin
+    - Eliminar importación de `PrismaClient`
+    - _Requisitos: 9.1, 9.4, 3.2_
+
+- [x] 14. Migrar rutas API — Panel de Administración
+  - [x] 14.1 Migrar `src/app/api/admin/users/route.ts` (GET)
+    - Reemplazar `prisma.user.findMany()` por `supabase.from('users').select()` con paginación y filtros
+    - Actualizar importación de `UserRole`
+    - _Requisitos: 8.1, 8.4, 8.5_
+  - [x] 14.2 Migrar `src/app/api/admin/restaurants/route.ts` (GET, POST, PATCH)
+    - Reemplazar operaciones Prisma por Supabase para listar, crear y actualizar restaurantes
+    - Actualizar importación de `UserRole`
+    - _Requisitos: 8.1, 9.1, 9.2_
+  - [x] 14.3 Migrar `src/app/api/admin/products/route.ts` (GET, POST)
+    - Reemplazar operaciones Prisma por Supabase
+    - Eliminar importación de `PrismaClient`, actualizar `UserRole`
+    - _Requisitos: 8.1, 9.1_
+  - [x] 14.4 Migrar `src/app/api/admin/categories/route.ts` (GET, POST, PATCH, DELETE)
+    - Reemplazar operaciones CRUD de Prisma por Supabase
+    - Actualizar importación de `UserRole`
+    - _Requisitos: 8.1, 9.1, 9.2, 9.3_
+  - [x] 14.5 Migrar `src/app/api/admin/orders/route.ts` (GET)
+    - Reemplazar `prisma.order.findMany()` por `supabase.from('orders').select()` con paginación
+    - Actualizar importación de `UserRole`
+    - _Requisitos: 8.1, 8.4_
+  - [x] 14.6 Migrar `src/app/api/admin/metrics/route.ts` (GET)
+    - Reemplazar consultas agregadas de Prisma por `supabase.from().select('*', { count: 'exact', head: true })` y consultas equivalentes
+    - Actualizar importación de `UserRole`
+    - _Requisitos: 8.1, 8.6_
+  - [x] 14.7 Migrar `src/app/api/admin/audit-log/route.ts` (GET)
+    - Reemplazar `prisma.adminAuditLog.findMany()` por `supabase.from('admin_audit_log').select()`
+    - Actualizar importación de `UserRole`
+    - _Requisitos: 8.1, 8.4_
+
+- [x] 15. Migrar rutas API — Dominio Usuario y Consentimiento
+  - [x] 15.1 Migrar `src/app/api/consent/route.ts` (GET, POST)
+    - Reemplazar operaciones Prisma por Supabase para consultar y registrar consentimientos
+    - _Requisitos: 8.1, 9.1_
+  - [x] 15.2 Migrar `src/app/api/phone-verification/send/route.ts` y `verify/route.ts`
+    - Reemplazar operaciones Prisma por Supabase para verificación telefónica
+    - _Requisitos: 9.1, 9.2_
+  - [x] 15.3 Migrar `src/app/api/user/export-data/route.ts` (GET)
+    - Reemplazar múltiples consultas Prisma por consultas Supabase para exportar datos del usuario
+    - _Requisitos: 8.1_
+  - [x] 15.4 Migrar `src/app/api/user/delete-account/route.ts` (DELETE)
+    - Reemplazar `prisma.$transaction()` por operaciones Supabase secuenciales para eliminar datos del usuario
+    - Añadir `supabase.auth.admin.deleteUser()` usando Service Role para eliminar el usuario de Supabase Auth
+    - Eliminar importación de `PrismaClient`
+    - _Requisitos: 9.3, 9.4_
+  - [x] 15.5 Migrar `src/app/api/geocoding/candidates/route.ts` (GET)
+    - Reemplazar cualquier referencia a Prisma si existe; verificar que usa el servicio de geocoding
+    - _Requisitos: 8.1_
+
+- [x] 16. Punto de control — Verificar todas las rutas API migradas
+  - Asegurar que todas las rutas API compilan y funcionan correctamente con Supabase. Ejecutar `npx tsc --noEmit` para verificar tipos. Preguntar al usuario si surgen dudas.
+
+- [x] 17. Migrar servicios internos
+  - [x] 17.1 Migrar `src/lib/services/audit.service.ts`
+    - Reemplazar `prisma.adminAuditLog.create()` por `supabase.from('admin_audit_log').insert()`
+    - Usar `createServiceClient()` de `@/lib/supabase/service` para omitir RLS
+    - Traducir campos camelCase a snake_case: `resourceType` → `resource_type`, `resourceId` → `resource_id`, `ipAddress` → `ip_address`
+    - Mantener el patrón de fallo silencioso (try/catch con console.error)
+    - _Requisitos: 10.1, 10.3_
+  - [x] 17.2 Migrar `src/lib/services/geocoding.service.ts`
+    - Reemplazar `prisma.geocodingCache.findUnique()` por `supabase.from('geocoding_cache').select().eq('normalized_address', normalized).single()`
+    - Reemplazar `prisma.geocodingCache.create()` por `supabase.from('geocoding_cache').insert()`
+    - Usar `createServiceClient()` para omitir RLS
+    - Traducir campos: `normalizedAddress` → `normalized_address`, `comunidadAutonoma` → `comunidad_autonoma`
+    - _Requisitos: 10.2, 10.3_
+
+- [x] 18. Migrar script de seed
+  - [x] 18.1 Reescribir `scripts/seed.ts` con cliente Supabase
+    - Mover `prisma/seed.ts` a `scripts/seed.ts`
+    - Reemplazar `PrismaClient` + `PrismaPg` por `createClient` de `@supabase/supabase-js` con Service Role Key
+    - Crear usuarios con `supabase.auth.admin.createUser()` + inserción en tabla `users`
+    - Eliminar uso de `bcryptjs` (`hashSync`)
+    - Mantener los mismos datos: 14 alérgenos EU, 12 usuarios, 5 restaurantes, horarios, categorías, 50+ productos, 10 direcciones, 12 pedidos
+    - Traducir todos los campos camelCase a snake_case en las inserciones
+    - _Requisitos: 13.1, 13.2, 13.3, 13.4_
+
+- [x] 19. Crear políticas RLS
+  - [x] 19.1 Crear migración SQL con políticas RLS básicas
+    - Crear `supabase/migrations/xxx_rls_policies.sql`
+    - Habilitar RLS en tablas accedidas con anon key
+    - Crear políticas para: `users` (SELECT/UPDATE propio perfil), `carts` (CRUD propio carrito), `cart_items` (CRUD propios items), `addresses` (CRUD propias direcciones), `orders` (SELECT propios pedidos)
+    - Crear políticas de lectura pública para: `restaurants`, `opening_hours`, `categories`, `products`, `allergens`, `product_allergens`
+    - Documentar que tablas admin (`admin_audit_log`, `restaurant_users`, `order_status_history`) se acceden solo con Service Role Key
+    - _Requisitos: 17.1, 17.2, 17.3, 17.4_
+
+- [x] 20. Limpieza de archivos obsoletos
+  - [x] 20.1 Eliminar archivos de Prisma y NextAuth
+    - Eliminar `src/lib/db.ts`
+    - Eliminar `src/lib/auth/auth.ts`
+    - Eliminar `src/lib/auth/auth.config.ts`
+    - Eliminar `src/types/next-auth.d.ts`
+    - Eliminar `src/app/api/auth/[...nextauth]/route.ts`
+    - Eliminar `prisma.config.ts`
+    - Eliminar directorio `src/generated/prisma/`
+    - Conservar directorio `prisma/` con schema y migraciones como referencia histórica
+    - _Requisitos: 16.1, 16.2, 14.4, 14.5_
+  - [x] 20.2 Verificar que no quedan importaciones huérfanas
+    - Buscar y eliminar cualquier importación residual de `@/lib/db`, `@/generated/prisma`, `next-auth`, `bcryptjs`
+    - Actualizar cualquier importación de `@/lib/auth/auth` que aún exista
+    - _Requisitos: 2.4, 16.4_
+
+- [x] 21. Actualizar CI/CD
+  - [x] 21.1 Actualizar workflow de CI (`.github/workflows/ci.yml`)
+    - Eliminar los pasos `Generate Prisma client` (`npx prisma generate`) de los jobs `lint`, `type-check` y `test-unit`
+    - Eliminar la variable de entorno `DATABASE_URL` de los jobs de CI
+    - Añadir paso de generación de tipos Supabase si es necesario para el type-check, o incluir `src/types/database.ts` en el repositorio
+    - _Requisitos: 14.4_
+
+- [x] 22. Migrar páginas de autenticación
+  - [x] 22.1 Actualizar páginas de login, registro y reset password
+    - Reemplazar llamadas a `signIn()` de NextAuth por llamadas a las nuevas rutas API de Supabase Auth o Server Actions
+    - Actualizar formulario de registro para llamar a la API migrada
+    - Actualizar formulario de recuperación de contraseña para usar Supabase Auth
+    - Mantener las mismas rutas de páginas: `/auth/login`, `/auth/registro`, `/auth/reset-password`
+    - _Requisitos: 12.1, 12.2, 12.3, 12.4_
+
+- [x] 23. Verificación final
+  - [x] 23.1 Verificar compilación del proyecto
+    - Ejecutar `npx tsc --noEmit` y corregir cualquier error de tipos
+    - Ejecutar `pnpm run build` y verificar que el build completa sin errores
+    - _Requisitos: 1.4, 2.4, 16.4_
+  - [x] 23.2 Verificar que no quedan rastros de Prisma/NextAuth
+    - Buscar en todo el proyecto: `prisma`, `next-auth`, `NextAuth`, `bcryptjs`, `@/lib/db`, `@/generated/prisma`
+    - Confirmar que `package.json` no contiene dependencias de Prisma ni NextAuth
+    - Confirmar que `.env.example` no contiene variables obsoletas
+    - _Requisitos: 14.3, 14.4, 15.2, 15.3, 16.1, 16.2_
+  - [ ]* 23.3 Ejecutar suite de tests
+    - Ejecutar `pnpm run test` y verificar que todos los tests unitarios pasan
+    - Ejecutar tests de propiedad del RBAC
+    - _Requisitos: 11.2, 7.3, 7.6_
+
+- [x] 24. Punto de control final
+  - Asegurar que el proyecto compila, todos los tests pasan, no quedan dependencias ni archivos de Prisma/NextAuth, y las variables de entorno están correctamente configuradas. Preguntar al usuario si surgen dudas.
+
+## Notas
+
+- Las tareas marcadas con `*` son opcionales y pueden omitirse para un MVP más rápido
+- Cada tarea referencia requisitos específicos para trazabilidad
+- Los puntos de control aseguran validación incremental
+- Los tests de propiedad validan las propiedades universales de corrección del RBAC
+- La lógica de dominio (haversine, ETA, FSM de pedidos, slots) NO se modifica — es pura y no depende de Prisma
+- Los campos se traducen de camelCase (Prisma) a snake_case (Supabase) según el mapeo del diseño
+- El directorio `prisma/` se conserva como referencia histórica del esquema

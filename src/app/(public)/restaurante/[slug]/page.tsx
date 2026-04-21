@@ -1,9 +1,7 @@
 import { notFound } from 'next/navigation';
-import { prisma } from '@/lib/db';
+import { createClient } from '@/lib/supabase/server';
 import RestaurantDetailHeader from './RestaurantDetailHeader';
 import CategoryTabs from './CategoryTabs';
-
-export const dynamic = 'force-dynamic';
 
 /** Converts JS getDay() (0=Sunday) to our system (0=Monday, 6=Sunday). */
 function jsDayToSystem(jsDay: number): number {
@@ -56,61 +54,86 @@ export default async function RestaurantDetailPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
+  const supabase = await createClient();
 
-  const restaurant = await prisma.restaurant.findUnique({
-    where: { slug },
-    include: {
-      openingHours: {
-        orderBy: [{ dayOfWeek: 'asc' }, { openTime: 'asc' }],
-      },
-      categories: {
-        orderBy: { sortOrder: 'asc' },
-        include: {
-          products: {
-            where: { isAvailable: true },
-            include: {
-              productAllergens: {
-                include: { allergen: true },
-              },
-            },
-          },
-        },
-      },
-    },
-  });
+  // Fetch restaurant with opening hours
+  const { data: restaurant } = await supabase
+    .from('restaurants')
+    .select('*')
+    .eq('slug', slug)
+    .eq('isActive', true)
+    .single();
 
-  if (!restaurant || !restaurant.isActive) {
+  if (!restaurant) {
     notFound();
   }
 
-  const now = new Date();
-  const isOpen = isRestaurantOpen(restaurant.openingHours, now);
-  const nextOpeningTime = isOpen ? null : getNextOpeningTime(restaurant.openingHours, now);
+  // Fetch opening hours
+  const { data: openingHours } = await supabase
+    .from('opening_hours')
+    .select('*')
+    .eq('restaurantId', restaurant.id)
+    .order('dayOfWeek', { ascending: true })
+    .order('openTime', { ascending: true });
 
-  const openingHoursFormatted = restaurant.openingHours.map((h: typeof restaurant.openingHours[number]) => ({
+  // Fetch categories with products and allergens
+  const { data: categoriesData } = await supabase
+    .from('categories')
+    .select('*')
+    .eq('restaurantId', restaurant.id)
+    .order('sortOrder', { ascending: true });
+
+  // Fetch products for all categories
+  const categoryIds = (categoriesData ?? []).map((c) => c.id);
+  const { data: productsData } = await supabase
+    .from('products')
+    .select('*')
+    .in('categoryId', categoryIds.length > 0 ? categoryIds : ['__none__'])
+    .eq('isAvailable', true);
+
+  // Fetch product allergens with allergen details
+  const productIds = (productsData ?? []).map((p) => p.id);
+  const { data: productAllergensData } = await supabase
+    .from('product_allergens')
+    .select('*, allergens(*)')
+    .in('productId', productIds.length > 0 ? productIds : ['__none__']);
+
+  const hours = openingHours ?? [];
+  const now = new Date();
+  const isOpen = isRestaurantOpen(hours, now);
+  const nextOpeningTime = isOpen ? null : getNextOpeningTime(hours, now);
+
+  const openingHoursFormatted = hours.map((h) => ({
     dayOfWeek: h.dayOfWeek,
     dayName: DAY_NAMES[h.dayOfWeek],
     openTime: h.openTime,
     closeTime: h.closeTime,
   }));
 
-  const categories = restaurant.categories.map((cat: typeof restaurant.categories[number]) => ({
+  // Build allergens map: productId -> allergens[]
+  const allergensMap = new Map<string, { id: number; code: string; nameEs: string; icon: string }[]>();
+  for (const pa of productAllergensData ?? []) {
+    const allergen = pa.allergens as unknown as { id: number; code: string; nameEs: string; icon: string } | null;
+    if (!allergen) continue;
+    const existing = allergensMap.get(pa.productId) ?? [];
+    existing.push(allergen);
+    allergensMap.set(pa.productId, existing);
+  }
+
+  const categories = (categoriesData ?? []).map((cat) => ({
     id: cat.id,
     name: cat.name,
     sortOrder: cat.sortOrder,
-    products: cat.products.map((p: typeof cat.products[number]) => ({
-      id: p.id,
-      name: p.name,
-      description: p.description,
-      priceEur: Number(p.priceEur),
-      imageUrl: p.imageUrl,
-      allergens: p.productAllergens.map((pa: typeof p.productAllergens[number]) => ({
-        id: pa.allergen.id,
-        code: pa.allergen.code,
-        nameEs: pa.allergen.nameEs,
-        icon: pa.allergen.icon,
+    products: (productsData ?? [])
+      .filter((p) => p.categoryId === cat.id)
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        description: p.description,
+        priceEur: Number(p.priceEur),
+        imageUrl: p.imageUrl,
+        allergens: allergensMap.get(p.id) ?? [],
       })),
-    })),
   }));
 
   return (

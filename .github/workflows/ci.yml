@@ -27,11 +27,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Generate Prisma client
-        run: npx prisma generate
-        env:
-          DATABASE_URL: "postgresql://dummy:dummy@localhost:5432/dummy"
-
       - name: Run ESLint
         run: pnpm run lint
 
@@ -51,11 +46,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Generate Prisma client
-        run: npx prisma generate
-        env:
-          DATABASE_URL: "postgresql://dummy:dummy@localhost:5432/dummy"
-
+      # src/types/database.ts is committed to the repo — no generation step needed
       - name: Run TypeScript type check
         run: npx tsc --noEmit
 
@@ -74,11 +65,6 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Generate Prisma client
-        run: npx prisma generate
-        env:
-          DATABASE_URL: "postgresql://dummy:dummy@localhost:5432/dummy"
 
       - name: Run unit tests
         run: pnpm run test

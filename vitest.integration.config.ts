@@ -16,7 +16,8 @@ export default defineConfig({
     hookTimeout: 30000,
     passWithNoTests: true,
     env: {
-      DATABASE_URL: process.env.DATABASE_URL_TEST ?? 'postgresql://localhost:5432/pueblo_delivery_test',
+      NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'http://127.0.0.1:54321',
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '',
     },
     coverage: {
       provider: 'v8',

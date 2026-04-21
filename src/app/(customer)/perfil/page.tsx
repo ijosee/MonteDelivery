@@ -1,7 +1,9 @@
 'use client';
 
-import { useSession, signOut } from 'next-auth/react';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { createClient } from '@/lib/supabase/client';
 
 const PROFILE_LINKS = [
   { href: '/perfil/direcciones', label: 'Mis direcciones', icon: '📍' },
@@ -16,10 +18,33 @@ const PROFILE_LINKS = [
  * Requisitos: 5.14
  */
 export default function PerfilPage() {
-  const { data: session } = useSession();
+  const router = useRouter();
+  const [user, setUser] = useState<{ name: string | null; email: string | null } | null>(null);
 
-  const handleSignOut = () => {
-    signOut({ callbackUrl: '/' });
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data: { user: authUser } }) => {
+      if (authUser) {
+        // Fetch profile name from users table
+        supabase
+          .from('users')
+          .select('name')
+          .eq('id', authUser.id)
+          .single()
+          .then(({ data: profile }) => {
+            setUser({
+              name: profile?.name ?? authUser.user_metadata?.name ?? null,
+              email: authUser.email ?? null,
+            });
+          });
+      }
+    });
+  }, []);
+
+  const handleSignOut = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    router.push('/');
+    router.refresh();
   };
 
   return (
@@ -27,14 +52,14 @@ export default function PerfilPage() {
       {/* User info */}
       <div className="flex items-center gap-4">
         <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green-100 text-2xl">
-          {session?.user?.name?.[0]?.toUpperCase() ?? '👤'}
+          {user?.name?.[0]?.toUpperCase() ?? '👤'}
         </div>
         <div>
           <h1 className="text-xl font-bold text-gray-900">
-            {session?.user?.name ?? 'Mi perfil'}
+            {user?.name ?? 'Mi perfil'}
           </h1>
           <p className="text-sm text-gray-500">
-            {session?.user?.email ?? ''}
+            {user?.email ?? ''}
           </p>
         </div>
       </div>

@@ -1,8 +1,6 @@
-import { type NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
-import { getAvailableSlots } from '@/lib/domain/slot-generator';
-
-export const dynamic = 'force-dynamic';
+import { type NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { getAvailableSlots } from "@/lib/domain/slot-generator";
 
 /**
  * GET /api/restaurants/[slug]/available-slots?date=YYYY-MM-DD
@@ -16,62 +14,61 @@ export async function GET(
   try {
     const { slug } = await params;
     const { searchParams } = request.nextUrl;
-    const date = searchParams.get('date');
+    const date = searchParams.get("date");
 
     // Validate date parameter
     if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return NextResponse.json(
         {
           data: null,
-          error: 'El parámetro date es obligatorio con formato YYYY-MM-DD.',
+          error: "El parámetro date es obligatorio con formato YYYY-MM-DD.",
           success: false,
         },
         { status: 422 }
       );
     }
 
-    // Try finding by slug first, then by id (supports both)
-    let restaurant = await prisma.restaurant.findUnique({
-      where: { slug },
-      select: {
-        id: true,
-        isActive: true,
-        openingHours: {
-          select: {
-            dayOfWeek: true,
-            openTime: true,
-            closeTime: true,
-          },
-        },
-      },
-    });
+    const supabase = await createClient();
 
-    if (!restaurant) {
-      restaurant = await prisma.restaurant.findUnique({
-        where: { id: slug },
-        select: {
-          id: true,
-          isActive: true,
-          openingHours: {
-            select: {
-              dayOfWeek: true,
-              openTime: true,
-              closeTime: true,
-            },
-          },
-        },
-      });
+    // Try finding by slug first
+    let { data: restaurant, error } = await supabase
+      .from("restaurants")
+      .select("id, isActive, opening_hours(dayOfWeek, openTime, closeTime)")
+      .eq("slug", slug)
+      .single();
+
+    // If not found by slug, try by id
+    if (error?.code === "PGRST116" || !restaurant) {
+      const result = await supabase
+        .from("restaurants")
+        .select("id, isActive, opening_hours(dayOfWeek, openTime, closeTime)")
+        .eq("id", slug)
+        .single();
+
+      restaurant = result.data;
+      error = result.error;
     }
 
-    if (!restaurant?.isActive) {
+    if (error || !restaurant?.isActive) {
+      if (error && error.code !== "PGRST116") {
+        console.error("Error fetching restaurant for slots:", error);
+        return NextResponse.json(
+          {
+            data: null,
+            error: "Error al obtener los slots disponibles",
+            success: false,
+          },
+          { status: 500 }
+        );
+      }
       return NextResponse.json(
-        { data: null, error: 'Restaurante no encontrado', success: false },
+        { data: null, error: "Restaurante no encontrado", success: false },
         { status: 404 }
       );
     }
 
     const slots = getAvailableSlots({
-      openingHours: restaurant.openingHours,
+      openingHours: restaurant.opening_hours ?? [],
       date,
       now: new Date(),
     });
@@ -82,9 +79,13 @@ export async function GET(
       success: true,
     });
   } catch (error) {
-    console.error('Error fetching available slots:', error);
+    console.error("Error fetching available slots:", error);
     return NextResponse.json(
-      { data: null, error: 'Error al obtener los slots disponibles', success: false },
+      {
+        data: null,
+        error: "Error al obtener los slots disponibles",
+        success: false,
+      },
       { status: 500 }
     );
   }

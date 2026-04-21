@@ -244,7 +244,6 @@ describe('loginSchema', () => {
 describe('resetPasswordSchema', () => {
   it('accepts valid reset data', () => {
     const result = resetPasswordSchema.safeParse({
-      token: 'some-reset-token',
       password: 'newsecurepass',
     });
     expect(result.success).toBe(true);
@@ -252,7 +251,6 @@ describe('resetPasswordSchema', () => {
 
   it('rejects short password', () => {
     const result = resetPasswordSchema.safeParse({
-      token: 'some-reset-token',
       password: 'short',
     });
     expect(result.success).toBe(false);

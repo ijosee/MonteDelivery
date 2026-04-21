@@ -35,7 +35,7 @@ yarn-error.log*
 .env.local
 .env.*.local
 
-# prisma generated client
+# generated types / clients
 /src/generated/
 
 # vercel

@@ -1,15 +1,12 @@
-import { type NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/lib/auth/auth';
-import { prisma } from '@/lib/db';
-import { createOrderSchema } from '@/lib/validators/order.schema';
-import { ERRORS, formatError } from '@/lib/errors';
-import { distanceKm, isInsideDeliveryZone } from '@/lib/domain/haversine';
-import { computeEta } from '@/lib/domain/eta-calculator';
-import { getAvailableSlots } from '@/lib/domain/slot-generator';
-import { logAudit } from '@/lib/services/audit.service';
-import type { PrismaClient } from '@/generated/prisma/client';
-
-export const dynamic = 'force-dynamic';
+import { type NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { getAuthUser } from "@/lib/auth/session";
+import { createOrderSchema } from "@/lib/validators/order.schema";
+import { ERRORS, formatError } from "@/lib/errors";
+import { distanceKm, isInsideDeliveryZone } from "@/lib/domain/haversine";
+import { computeEta } from "@/lib/domain/eta-calculator";
+import { getAvailableSlots } from "@/lib/domain/slot-generator";
+import { logAudit } from "@/lib/services/audit.service";
 
 /**
  * GET /api/orders — Paginated order history for the authenticated user.
@@ -18,43 +15,63 @@ export const dynamic = 'force-dynamic';
  */
 export async function GET(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const authUser = await getAuthUser();
+    if (!authUser) {
       return NextResponse.json(
-        { data: null, error: 'No autenticado', success: false },
+        { data: null, error: "No autenticado", success: false },
         { status: 401 }
       );
     }
 
     const { searchParams } = new URL(request.url);
-    const page = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10));
-    const limit = Math.min(50, Math.max(1, parseInt(searchParams.get('limit') ?? '10', 10)));
-    const skip = (page - 1) * limit;
+    const page = Math.max(
+      1,
+      Number.parseInt(searchParams.get("page") ?? "1", 10)
+    );
+    const limit = Math.min(
+      50,
+      Math.max(1, Number.parseInt(searchParams.get("limit") ?? "10", 10))
+    );
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
 
-    const [orders, total] = await Promise.all([
-      prisma.order.findMany({
-        where: { userId: session.user.id },
-        orderBy: { createdAt: 'desc' },
-        skip,
-        take: limit,
-        include: {
-          restaurant: { select: { name: true } },
-        },
-      }),
-      prisma.order.count({ where: { userId: session.user.id } }),
+    const supabase = await createClient();
+
+    const [ordersResult, countResult] = await Promise.all([
+      supabase
+        .from("orders")
+        .select("*, restaurants(name)")
+        .eq("userId", authUser.id)
+        .order("createdAt", { ascending: false })
+        .range(from, to),
+      supabase
+        .from("orders")
+        .select("*", { count: "exact", head: true })
+        .eq("userId", authUser.id),
     ]);
+
+    if (ordersResult.error) {
+      console.error("Error fetching orders:", ordersResult.error);
+      return NextResponse.json(
+        { data: null, error: "Error al obtener los pedidos", success: false },
+        { status: 500 }
+      );
+    }
+
+    const orders = ordersResult.data ?? [];
+    const total = countResult.count ?? 0;
 
     return NextResponse.json({
       data: {
-        orders: orders.map((o: typeof orders[number]) => ({
+        orders: orders.map((o) => ({
           id: o.id,
           orderNumber: o.orderNumber,
-          restaurantName: o.restaurant.name,
+          restaurantName: o.restaurants?.name ?? null,
           status: o.currentStatus,
           fulfillmentType: o.fulfillmentType,
           totalEur: Number(o.totalEur),
-          eta: o.eta?.toISOString() ?? null,
-          createdAt: o.createdAt.toISOString(),
+          eta: o.eta ?? null,
+          createdAt: o.createdAt,
         })),
         pagination: {
           page,
@@ -67,9 +84,9 @@ export async function GET(request: NextRequest) {
       success: true,
     });
   } catch (error) {
-    console.error('Error fetching orders:', error);
+    console.error("Error fetching orders:", error);
     return NextResponse.json(
-      { data: null, error: 'Error al obtener los pedidos', success: false },
+      { data: null, error: "Error al obtener los pedidos", success: false },
       { status: 500 }
     );
   }
@@ -79,12 +96,16 @@ export async function GET(request: NextRequest) {
  * Helper: check if restaurant is currently open.
  */
 function isRestaurantOpen(
-  openingHours: { dayOfWeek: number; openTime: string; closeTime: string }[],
+  openingHours: {
+    dayOfWeek: number;
+    openTime: string;
+    closeTime: string;
+  }[],
   now: Date = new Date()
 ): boolean {
   const jsDay = now.getDay();
   const dayOfWeek = jsDay === 0 ? 6 : jsDay - 1;
-  const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  const currentTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 
   return openingHours.some(
     (h) =>
@@ -105,17 +126,15 @@ function isRestaurantOpen(
  * 5. Verify delivery zone with Haversine (error OUTSIDE_DELIVERY_ZONE)
  * 6. Verify all cart products are available (error PRODUCT_UNAVAILABLE)
  * 7. Calculate ETA with computeEta
- * 8. Create order + order_items (snapshot) + order_status_history (PLACED)
- * 9. Clear cart after creating order
- * 10. Log to audit service
- * 11. Use Prisma transaction for atomicity
+ * 8. Create order via RPC (create_order_transaction) for atomicity
+ * 9. Log to audit service
  */
 export async function POST(request: Request) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const authUser = await getAuthUser();
+    if (!authUser) {
       return NextResponse.json(
-        { data: null, error: 'No autenticado', success: false },
+        { data: null, error: "No autenticado", success: false },
         { status: 401 }
       );
     }
@@ -123,29 +142,31 @@ export async function POST(request: Request) {
     const body = await request.json();
     const parsed = createOrderSchema.safeParse(body);
     if (!parsed.success) {
-      const firstError = parsed.error.issues[0]?.message ?? 'Datos inválidos.';
+      const firstError = parsed.error.issues[0]?.message ?? "Datos inválidos.";
       return NextResponse.json(
         { data: null, error: firstError, success: false },
         { status: 422 }
       );
     }
 
-    const { addressId, phone, fulfillmentType, scheduledFor, idempotencyKey } = parsed.data;
+    const {
+      addressId,
+      phone,
+      fulfillmentType,
+      scheduledFor,
+      idempotencyKey,
+    } = parsed.data;
+
+    const supabase = await createClient();
 
     // 2. Check idempotency_key: if duplicate, return existing order
-    const existingOrder = await prisma.order.findUnique({
-      where: { idempotencyKey },
-      select: {
-        id: true,
-        orderNumber: true,
-        currentStatus: true,
-        totalEur: true,
-        eta: true,
-        etaWindowEnd: true,
-        fulfillmentType: true,
-        createdAt: true,
-      },
-    });
+    const { data: existingOrder } = await supabase
+      .from("orders")
+      .select(
+        "id, orderNumber, currentStatus, totalEur, eta, etaWindowEnd, fulfillmentType, createdAt"
+      )
+      .eq("idempotencyKey", idempotencyKey)
+      .single();
 
     if (existingOrder) {
       return NextResponse.json(
@@ -155,10 +176,10 @@ export async function POST(request: Request) {
             orderNumber: existingOrder.orderNumber,
             status: existingOrder.currentStatus,
             totalEur: Number(existingOrder.totalEur),
-            eta: existingOrder.eta?.toISOString() ?? null,
-            etaWindowEnd: existingOrder.etaWindowEnd?.toISOString() ?? null,
+            eta: existingOrder.eta ?? null,
+            etaWindowEnd: existingOrder.etaWindowEnd ?? null,
             fulfillmentType: existingOrder.fulfillmentType,
-            createdAt: existingOrder.createdAt.toISOString(),
+            createdAt: existingOrder.createdAt,
           },
           error: null,
           success: true,
@@ -168,53 +189,44 @@ export async function POST(request: Request) {
     }
 
     // Fetch user's address (with lat/lng for zone validation)
-    const address = await prisma.address.findUnique({
-      where: { id: addressId },
-      select: {
-        id: true,
-        userId: true,
-        street: true,
-        municipality: true,
-        city: true,
-        postalCode: true,
-        lat: true,
-        lng: true,
-      },
-    });
+    const { data: address, error: addressError } = await supabase
+      .from("addresses")
+      .select("id, userId, street, municipality, city, postalCode, lat, lng")
+      .eq("id", addressId)
+      .single();
 
-    if (!address || address.userId !== session.user.id) {
+    if (addressError || !address || address.userId !== authUser.id) {
       return NextResponse.json(
-        { data: null, error: 'Dirección no encontrada', success: false },
+        { data: null, error: "Dirección no encontrada", success: false },
         { status: 404 }
       );
     }
 
     // Fetch user's cart with items and product details
-    const cart = await prisma.cart.findUnique({
-      where: { userId: session.user.id },
-      include: {
-        items: {
-          include: {
-            product: {
-              select: {
-                id: true,
-                name: true,
-                priceEur: true,
-                isAvailable: true,
-                categoryId: true,
-                category: {
-                  select: { restaurantId: true },
-                },
-              },
-            },
-          },
-        },
-      },
-    });
+    const { data: cart, error: cartError } = await supabase
+      .from("carts")
+      .select(
+        "id, restaurantId, cart_items(id, productId, quantity, products(id, name, priceEur, isAvailable, categoryId, categories(restaurantId)))"
+      )
+      .eq("userId", authUser.id)
+      .single();
 
-    if (!cart || cart.items.length === 0) {
+    if (cartError && cartError.code !== "PGRST116") {
+      console.error("Error fetching cart:", cartError);
       return NextResponse.json(
-        { data: null, error: ERRORS.CART_EMPTY.message, code: ERRORS.CART_EMPTY.code, success: false },
+        { data: null, error: "Error al obtener el carrito", success: false },
+        { status: 500 }
+      );
+    }
+
+    if (!cart?.cart_items?.length) {
+      return NextResponse.json(
+        {
+          data: null,
+          error: ERRORS.CART_EMPTY.message,
+          code: ERRORS.CART_EMPTY.code,
+          success: false,
+        },
         { status: 422 }
       );
     }
@@ -222,33 +234,39 @@ export async function POST(request: Request) {
     const restaurantId = cart.restaurantId;
     if (!restaurantId) {
       return NextResponse.json(
-        { data: null, error: 'El carrito no tiene restaurante asociado', success: false },
+        {
+          data: null,
+          error: "El carrito no tiene restaurante asociado",
+          success: false,
+        },
         { status: 422 }
       );
     }
 
     // Fetch restaurant details
-    const restaurant = await prisma.restaurant.findUnique({
-      where: { id: restaurantId },
-      include: {
-        openingHours: {
-          select: { dayOfWeek: true, openTime: true, closeTime: true },
-        },
-      },
-    });
+    const { data: restaurant, error: restaurantError } = await supabase
+      .from("restaurants")
+      .select("*, opening_hours(dayOfWeek, openTime, closeTime)")
+      .eq("id", restaurantId)
+      .single();
 
-    if (!restaurant || !restaurant.isActive) {
+    if (restaurantError || !restaurant.isActive) {
       return NextResponse.json(
-        { data: null, error: 'Restaurante no encontrado o inactivo', success: false },
+        {
+          data: null,
+          error: "Restaurante no encontrado o inactivo",
+          success: false,
+        },
         { status: 404 }
       );
     }
 
     const now = new Date();
+    const openingHours = restaurant.opening_hours ?? [];
 
     // 3. Verify restaurant is open for ASAP
-    if (fulfillmentType === 'ASAP') {
-      if (!isRestaurantOpen(restaurant.openingHours, now)) {
+    if (fulfillmentType === "ASAP") {
+      if (!isRestaurantOpen(openingHours, now)) {
         return NextResponse.json(
           {
             data: null,
@@ -264,17 +282,17 @@ export async function POST(request: Request) {
     }
 
     // 4. Verify slot is valid for SCHEDULED
-    if (fulfillmentType === 'SCHEDULED' && scheduledFor) {
+    if (fulfillmentType === "SCHEDULED" && scheduledFor) {
       const scheduledDate = new Date(scheduledFor);
-      const dateStr = scheduledDate.toISOString().split('T')[0];
+      const dateStr = scheduledDate.toISOString().split("T")[0];
 
       const availableSlots = getAvailableSlots({
-        openingHours: restaurant.openingHours,
+        openingHours,
         date: dateStr,
         now,
       });
 
-      const requestedSlot = `${String(scheduledDate.getHours()).padStart(2, '0')}:${String(scheduledDate.getMinutes()).padStart(2, '0')}`;
+      const requestedSlot = `${String(scheduledDate.getHours()).padStart(2, "0")}:${String(scheduledDate.getMinutes()).padStart(2, "0")}`;
 
       if (!availableSlots.includes(requestedSlot)) {
         return NextResponse.json(
@@ -299,7 +317,15 @@ export async function POST(request: Request) {
       restaurant.lng
     );
 
-    if (!isInsideDeliveryZone(address.lat, address.lng, restaurant.lat, restaurant.lng, restaurant.deliveryRadiusKm)) {
+    if (
+      !isInsideDeliveryZone(
+        address.lat,
+        address.lng,
+        restaurant.lat,
+        restaurant.lng,
+        restaurant.deliveryRadiusKm
+      )
+    ) {
       const errorMsg = formatError(ERRORS.OUTSIDE_DELIVERY_ZONE, {
         maxRadius: restaurant.deliveryRadiusKm.toFixed(1),
         distance: distance.toFixed(1),
@@ -318,10 +344,10 @@ export async function POST(request: Request) {
     }
 
     // 6. Verify all cart products are available
-    for (const item of cart.items) {
-      if (!item.product.isAvailable) {
+    for (const item of cart.cart_items) {
+      if (!item.products?.isAvailable) {
         const errorMsg = formatError(ERRORS.PRODUCT_UNAVAILABLE, {
-          productName: item.product.name,
+          productName: item.products?.name ?? "Producto",
         });
         return NextResponse.json(
           {
@@ -338,25 +364,31 @@ export async function POST(request: Request) {
     }
 
     // Calculate subtotal and total
-    const subtotalEur = cart.items.reduce(
-      (sum: number, item: typeof cart.items[number]) => sum + Number(item.product.priceEur) * item.quantity,
+    const subtotalEur = cart.cart_items.reduce(
+      (sum, item) => sum + Number(item.products!.priceEur) * item.quantity,
       0
     );
     const deliveryFeeEur = Number(restaurant.deliveryFeeEur);
     const totalEur = subtotalEur + deliveryFeeEur;
 
     // Count total items for ETA
-    const totalItems = cart.items.reduce((sum: number, item: typeof cart.items[number]) => sum + item.quantity, 0);
+    const totalItems = cart.cart_items.reduce(
+      (sum, item) => sum + item.quantity,
+      0
+    );
 
     // Count active orders for queue factor
-    const activeOrderCount = await prisma.order.count({
-      where: {
-        restaurantId,
-        currentStatus: {
-          in: ['PLACED', 'ACCEPTED', 'PREPARING', 'READY_FOR_PICKUP', 'OUT_FOR_DELIVERY'],
-        },
-      },
-    });
+    const { count: activeOrderCount } = await supabase
+      .from("orders")
+      .select("*", { count: "exact", head: true })
+      .eq("restaurantId", restaurantId)
+      .in("currentStatus", [
+        "PLACED",
+        "ACCEPTED",
+        "PREPARING",
+        "READY_FOR_PICKUP",
+        "OUT_FOR_DELIVERY",
+      ]);
 
     // 7. Calculate ETA
     const scheduledForDate = scheduledFor ? new Date(scheduledFor) : null;
@@ -364,67 +396,65 @@ export async function POST(request: Request) {
       fulfillmentType,
       itemCount: totalItems,
       distanceKm: distance,
-      activeOrderCount,
+      activeOrderCount: activeOrderCount ?? 0,
       scheduledFor: scheduledForDate,
       now,
     });
 
-    // 8. Create order + order_items + order_status_history in a transaction
-    const order = await prisma.$transaction(async (tx: Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$use' | '$extends'>) => {
-      const newOrder = await tx.order.create({
-        data: {
-          userId: session.user!.id!,
-          restaurantId,
-          addressId,
-          phone,
-          fulfillmentType,
-          scheduledFor: scheduledForDate,
-          subtotalEur: Math.round(subtotalEur * 100) / 100,
-          deliveryFeeEur: Math.round(deliveryFeeEur * 100) / 100,
-          totalEur: Math.round(totalEur * 100) / 100,
-          currentStatus: 'PLACED',
-          eta: etaResult.eta,
-          etaWindowEnd: etaResult.etaWindowEnd ?? null,
-          idempotencyKey,
-        },
-      });
+    // 8. Create order via RPC (create_order_transaction) for atomicity
+    const rpcItems = cart.cart_items.map((item) => ({
+      productId: item.products!.id,
+      productName: item.products!.name,
+      productPriceEur: Number(item.products!.priceEur),
+      quantity: item.quantity,
+    }));
 
-      // Create order items (snapshot name and price)
-      await tx.orderItem.createMany({
-        data: cart.items.map((item: typeof cart.items[number]) => ({
-          orderId: newOrder.id,
-          productId: item.product.id,
-          productName: item.product.name,
-          productPriceEur: item.product.priceEur,
-          quantity: item.quantity,
-        })),
-      });
+    const { data: orderResult, error: rpcError } = await supabase.rpc(
+      "create_order_transaction",
+      {
+        p_user_id: authUser.id,
+        p_restaurant_id: restaurantId,
+        p_address_id: addressId,
+        p_phone: phone,
+        p_fulfillment_type: fulfillmentType,
+        p_scheduled_for: scheduledForDate?.toISOString() ?? null,
+        p_subtotal_eur: Math.round(subtotalEur * 100) / 100,
+        p_delivery_fee_eur: Math.round(deliveryFeeEur * 100) / 100,
+        p_total_eur: Math.round(totalEur * 100) / 100,
+        p_eta: etaResult.eta.toISOString(),
+        p_eta_window_end: etaResult.etaWindowEnd?.toISOString() ?? null,
+        p_idempotency_key: idempotencyKey,
+        p_items: rpcItems,
+      }
+    );
 
-      // Create initial status history entry (PLACED)
-      await tx.orderStatusHistory.create({
-        data: {
-          orderId: newOrder.id,
-          fromStatus: null,
-          toStatus: 'PLACED',
-          changedByUserId: session.user!.id!,
-        },
-      });
+    if (rpcError) {
+      console.error("Error creating order (RPC):", rpcError);
+      return NextResponse.json(
+        { data: null, error: "Error al crear el pedido", success: false },
+        { status: 500 }
+      );
+    }
 
-      // 9. Clear cart after creating order
-      await tx.cartItem.deleteMany({ where: { cartId: cart.id } });
-      await tx.cart.update({
-        where: { id: cart.id },
-        data: { restaurantId: null },
-      });
+    // The RPC returns a JSONB object with the created order data
+    const order = orderResult as {
+      id: string;
+      orderNumber: number;
+      currentStatus: string;
+      fulfillmentType: string;
+      subtotalEur: number;
+      deliveryFeeEur: number;
+      totalEur: number;
+      eta: string | null;
+      etaWindowEnd: string | null;
+      createdAt: string;
+    };
 
-      return newOrder;
-    });
-
-    // 10. Log to audit service (fire-and-forget, outside transaction)
+    // 9. Log to audit service (fire-and-forget, outside transaction)
     logAudit({
-      userId: session.user.id,
-      action: 'ORDER_CREATED',
-      resourceType: 'order',
+      userId: authUser.id,
+      action: "ORDER_CREATED",
+      resourceType: "order",
       resourceId: order.id,
       details: {
         orderNumber: order.orderNumber,
@@ -446,9 +476,9 @@ export async function POST(request: Request) {
           subtotalEur: Number(order.subtotalEur),
           deliveryFeeEur: Number(order.deliveryFeeEur),
           totalEur: Number(order.totalEur),
-          eta: order.eta?.toISOString() ?? null,
-          etaWindowEnd: order.etaWindowEnd?.toISOString() ?? null,
-          createdAt: order.createdAt.toISOString(),
+          eta: order.eta ?? null,
+          etaWindowEnd: order.etaWindowEnd ?? null,
+          createdAt: order.createdAt,
         },
         error: null,
         success: true,
@@ -456,9 +486,9 @@ export async function POST(request: Request) {
       { status: 201 }
     );
   } catch (error) {
-    console.error('Error creating order:', error);
+    console.error("Error creating order:", error);
     return NextResponse.json(
-      { data: null, error: 'Error al crear el pedido', success: false },
+      { data: null, error: "Error al crear el pedido", success: false },
       { status: 500 }
     );
   }

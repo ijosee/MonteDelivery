@@ -1,5 +1,5 @@
 // src/lib/auth/rbac.ts
-import { UserRole } from '@/generated/prisma/client';
+import type { UserRole } from '@/types/database';
 
 type Permission =
   | 'restaurants:list' | 'restaurants:read' | 'restaurants:create' | 'restaurants:edit' | 'restaurants:toggle'

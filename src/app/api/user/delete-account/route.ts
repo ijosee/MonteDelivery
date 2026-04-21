@@ -1,25 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
-import type { PrismaClient } from '@/generated/prisma/client';
-import { auth } from '@/lib/auth/auth';
+import { createClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/service';
+import { getAuthUser } from '@/lib/auth/session';
 import { logAudit } from '@/lib/services/audit.service';
 
 /**
  * POST /api/user/delete-account — Anonymize personal data (GDPR Art. 17).
  * Keeps anonymized order data for fiscal obligations (5 years).
- * Requisitos: 16.4, 16.5
  */
 export async function POST(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const authUser = await getAuthUser();
+    if (!authUser) {
       return NextResponse.json(
         { success: false, error: 'No autenticado' },
         { status: 401 }
       );
     }
 
-    const userId = session.user.id;
+    const userId = authUser.id;
     const ipAddress =
       request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? null;
 
@@ -33,40 +32,62 @@ export async function POST(request: NextRequest) {
       ipAddress: ipAddress ?? undefined,
     });
 
+    const supabase = await createClient();
+
     // Anonymize user data — keep the record but remove PII
     const anonymizedEmail = `deleted_${userId}@anonimizado.local`;
     const anonymizedName = 'Usuario eliminado';
 
-    await prisma.$transaction(async (tx: Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$use' | '$extends'>) => {
-      // 1. Anonymize user record
-      await tx.user.update({
-        where: { id: userId },
-        data: {
-          name: anonymizedName,
-          email: anonymizedEmail,
-          passwordHash: null,
-          image: null,
-        },
-      });
+    // 1. Anonymize user record
+    const { error: userError } = await supabase
+      .from('users')
+      .update({
+        name: anonymizedName,
+        email: anonymizedEmail,
+        passwordHash: null,
+        image: null,
+        updatedAt: new Date().toISOString(),
+      })
+      .eq('id', userId);
 
-      // 2. Delete addresses (not needed for fiscal obligations)
-      await tx.address.deleteMany({ where: { userId } });
+    if (userError) {
+      console.error('[API /user/delete-account] Error anonymizing user:', userError);
+      return NextResponse.json(
+        { success: false, error: 'Error al eliminar la cuenta' },
+        { status: 500 }
+      );
+    }
 
-      // 3. Delete cart and cart items
-      await tx.cart.deleteMany({ where: { userId } });
+    // 2. Delete addresses (not needed for fiscal obligations)
+    await supabase.from('addresses').delete().eq('userId', userId);
 
-      // 4. Delete cookie consents
-      await tx.cookieConsent.deleteMany({ where: { userId } });
+    // 3. Delete cart and cart items
+    const { data: cart } = await supabase
+      .from('carts')
+      .select('id')
+      .eq('userId', userId)
+      .single();
 
-      // 5. Delete auth accounts (OAuth links)
-      await tx.authAccount.deleteMany({ where: { userId } });
+    if (cart) {
+      await supabase.from('cart_items').delete().eq('cartId', cart.id);
+      await supabase.from('carts').delete().eq('id', cart.id);
+    }
 
-      // 6. Delete sessions
-      await tx.session.deleteMany({ where: { userId } });
+    // 4. Delete cookie consents
+    await supabase.from('cookie_consents').delete().eq('userId', userId);
 
-      // Orders are kept with anonymized user for fiscal obligations (5 years)
-      // The user record remains but with anonymized data
-    });
+    // 5. Delete auth accounts (OAuth links)
+    await supabase.from('auth_accounts').delete().eq('userId', userId);
+
+    // 6. Delete sessions
+    await supabase.from('sessions').delete().eq('userId', userId);
+
+    // 7. Delete user from Supabase Auth using service role
+    const serviceClient = createServiceClient();
+    await serviceClient.auth.admin.deleteUser(userId);
+
+    // Orders are kept with anonymized user for fiscal obligations (5 years)
+    // The user record remains but with anonymized data
 
     return NextResponse.json({
       success: true,

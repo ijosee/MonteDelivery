@@ -1,7 +1,5 @@
-import { type NextRequest } from 'next/server';
-import { prisma } from '@/lib/db';
-
-export const dynamic = 'force-dynamic';
+import { type NextRequest } from "next/server";
+import { createClient } from "@/lib/supabase/server";
 
 /**
  * Converts JS getDay() (0=Sunday) to our system (0=Monday, 6=Sunday).
@@ -18,7 +16,7 @@ function isRestaurantOpen(
   now: Date = new Date()
 ): boolean {
   const dayOfWeek = jsDayToSystem(now.getDay());
-  const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  const currentTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 
   return openingHours.some(
     (h) =>
@@ -29,7 +27,15 @@ function isRestaurantOpen(
 }
 
 /** Day names in Spanish */
-const DAY_NAMES = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+const DAY_NAMES = [
+  "Lunes",
+  "Martes",
+  "Miércoles",
+  "Jueves",
+  "Viernes",
+  "Sábado",
+  "Domingo",
+];
 
 /**
  * Finds the next opening time for a restaurant that is currently closed.
@@ -41,11 +47,13 @@ function getNextOpeningTime(
   if (openingHours.length === 0) return null;
 
   const currentDayOfWeek = jsDayToSystem(now.getDay());
-  const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  const currentTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 
   // Check remaining hours today
   const todayHours = openingHours
-    .filter((h) => h.dayOfWeek === currentDayOfWeek && h.openTime > currentTime)
+    .filter(
+      (h) => h.dayOfWeek === currentDayOfWeek && h.openTime > currentTime
+    )
     .sort((a, b) => a.openTime.localeCompare(b.openTime));
 
   if (todayHours.length > 0) {
@@ -75,41 +83,67 @@ export async function GET(
   try {
     const { slug } = await params;
 
-    const restaurant = await prisma.restaurant.findUnique({
-      where: { slug },
-      include: {
-        openingHours: {
-          orderBy: [{ dayOfWeek: 'asc' }, { openTime: 'asc' }],
-        },
-        deliveryZones: true,
-        categories: {
-          orderBy: { sortOrder: 'asc' },
-          include: {
-            products: {
-              where: { isAvailable: true },
-              include: {
-                productAllergens: {
-                  include: {
-                    allergen: true,
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    });
+    const supabase = await createClient();
 
-    if (!restaurant || !restaurant.isActive) {
+    const { data: restaurant, error } = await supabase
+      .from("restaurants")
+      .select(
+        "*, opening_hours(*), delivery_zones(*), categories(*, products(*, product_allergens(*, allergens(*))))"
+      )
+      .eq("slug", slug)
+      .single();
+
+    if (error || !restaurant) {
+      if (error?.code === "PGRST116" || !restaurant) {
+        return Response.json(
+          {
+            data: null,
+            error: "Restaurante no encontrado",
+            success: false,
+          },
+          { status: 404 }
+        );
+      }
+      console.error("Error fetching restaurant detail:", error);
       return Response.json(
-        { data: null, error: 'Restaurante no encontrado', success: false },
+        {
+          data: null,
+          error: "Error al obtener el restaurante",
+          success: false,
+        },
+        { status: 500 }
+      );
+    }
+
+    if (!restaurant.isActive) {
+      return Response.json(
+        {
+          data: null,
+          error: "Restaurante no encontrado",
+          success: false,
+        },
         { status: 404 }
       );
     }
 
     const now = new Date();
-    const isOpen = isRestaurantOpen(restaurant.openingHours, now);
-    const nextOpeningTime = isOpen ? null : getNextOpeningTime(restaurant.openingHours, now);
+
+    // Sort opening hours by dayOfWeek, then openTime
+    const sortedOpeningHours = [...(restaurant.opening_hours ?? [])].sort(
+      (a, b) =>
+        a.dayOfWeek - b.dayOfWeek ||
+        a.openTime.localeCompare(b.openTime)
+    );
+
+    const isOpen = isRestaurantOpen(sortedOpeningHours, now);
+    const nextOpeningTime = isOpen
+      ? null
+      : getNextOpeningTime(sortedOpeningHours, now);
+
+    // Sort categories by sortOrder and filter products by isAvailable
+    const sortedCategories = [...(restaurant.categories ?? [])].sort(
+      (a, b) => a.sortOrder - b.sortOrder
+    );
 
     const data = {
       id: restaurant.id,
@@ -125,43 +159,49 @@ export async function GET(
       deliveryRadiusKm: restaurant.deliveryRadiusKm,
       lat: restaurant.lat,
       lng: restaurant.lng,
-      openingHours: restaurant.openingHours.map((h: typeof restaurant.openingHours[number]) => ({
+      openingHours: sortedOpeningHours.map((h) => ({
         dayOfWeek: h.dayOfWeek,
         dayName: DAY_NAMES[h.dayOfWeek],
         openTime: h.openTime,
         closeTime: h.closeTime,
       })),
-      deliveryZones: restaurant.deliveryZones.map((z: typeof restaurant.deliveryZones[number]) => ({
+      deliveryZones: (restaurant.delivery_zones ?? []).map((z) => ({
         radiusKm: z.radiusKm,
         lat: z.lat,
         lng: z.lng,
       })),
-      categories: restaurant.categories.map((cat: typeof restaurant.categories[number]) => ({
+      categories: sortedCategories.map((cat) => ({
         id: cat.id,
         name: cat.name,
         sortOrder: cat.sortOrder,
-        products: cat.products.map((p: typeof cat.products[number]) => ({
-          id: p.id,
-          name: p.name,
-          description: p.description,
-          priceEur: Number(p.priceEur),
-          imageUrl: p.imageUrl,
-          isAvailable: p.isAvailable,
-          allergens: p.productAllergens.map((pa: typeof p.productAllergens[number]) => ({
-            id: pa.allergen.id,
-            code: pa.allergen.code,
-            nameEs: pa.allergen.nameEs,
-            icon: pa.allergen.icon,
+        products: (cat.products ?? [])
+          .filter((p) => p.isAvailable)
+          .map((p) => ({
+            id: p.id,
+            name: p.name,
+            description: p.description,
+            priceEur: Number(p.priceEur),
+            imageUrl: p.imageUrl,
+            isAvailable: p.isAvailable,
+            allergens: (p.product_allergens ?? []).map((pa) => ({
+              id: pa.allergens!.id,
+              code: pa.allergens!.code,
+              nameEs: pa.allergens!.nameEs,
+              icon: pa.allergens!.icon,
+            })),
           })),
-        })),
       })),
     };
 
     return Response.json({ data, error: null, success: true });
   } catch (error) {
-    console.error('Error fetching restaurant detail:', error);
+    console.error("Error fetching restaurant detail:", error);
     return Response.json(
-      { data: null, error: 'Error al obtener el restaurante', success: false },
+      {
+        data: null,
+        error: "Error al obtener el restaurante",
+        success: false,
+      },
       { status: 500 }
     );
   }

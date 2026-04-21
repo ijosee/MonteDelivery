@@ -1,6 +1,5 @@
 'use client';
 
-import { SessionProvider as NextAuthSessionProvider } from 'next-auth/react';
 import type { ReactNode } from 'react';
 
 interface Props {
@@ -8,9 +7,10 @@ interface Props {
 }
 
 /**
- * Client-side SessionProvider wrapper for next-auth.
- * Wraps the app to provide session context to client components.
+ * Session provider wrapper.
+ * With Supabase Auth, session management is handled via cookies and the middleware.
+ * This component is kept as a pass-through to avoid breaking the component tree.
  */
 export default function SessionProvider({ children }: Props) {
-  return <NextAuthSessionProvider>{children}</NextAuthSessionProvider>;
+  return <>{children}</>;
 }

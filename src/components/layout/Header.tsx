@@ -1,7 +1,8 @@
 import Link from 'next/link';
-import { auth } from '@/lib/auth/auth';
+import { createClient } from '@/lib/supabase/server';
 import SignOutButton from './SignOutButton';
 import CartBadge from '@/components/cart/CartBadge';
+import type { UserRole } from '@/types/database';
 
 const ROLE_LABELS: Record<string, string> = {
   ADMIN: 'Admin',
@@ -18,9 +19,27 @@ const ROLE_COLORS: Record<string, string> = {
 };
 
 export default async function Header() {
-  const session = await auth();
-  const user = session?.user;
-  const role = user?.role;
+  const supabase = await createClient();
+  const { data: { user: authUser } } = await supabase.auth.getUser();
+
+  let user: { id: string; name: string | null; email: string | null; role: UserRole | null } | null = null;
+  let role: string | null = null;
+
+  if (authUser) {
+    const { data: profile } = await supabase
+      .from('users')
+      .select('name, role')
+      .eq('id', authUser.id)
+      .single();
+
+    user = {
+      id: authUser.id,
+      name: profile?.name ?? null,
+      email: authUser.email ?? null,
+      role: (profile?.role as UserRole) ?? null,
+    };
+    role = profile?.role ?? null;
+  }
 
   return (
     <header className="sticky top-0 z-40 border-b border-gray-200 bg-white/95 shadow-sm backdrop-blur-sm">
